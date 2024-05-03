@@ -9,9 +9,12 @@ Pin Mapping:
     FIO1: Quadrature encoder channel B of the pendulum encoder
     FIO2: Quadrature encoder channel A of the DC motor encoder
     FIO3: Quadrature encoder channel B of the DC motor encoder
+    
     FIO4: PWM output for DC motor speed control
-    FIO6: IN1 to control direction of DC motor
-    FIO7: IN2 to control direction of DC motor
+    FIO5: Direction output to contorl direction of the the motor on the MD10C board
+    
+    FIO6: Trigger signal (digital output) of the ultrasonic sensor
+    FIO7: Echo signal (digital input) of the ultrasonic sensor
 
 """
 
@@ -20,19 +23,23 @@ import time
 import math
 
 # Constant definition
-pi = math.pi
+PI = math.pi
+SPEED_OF_SOUND = 343
 
 # Variable definition
-dt = 0.01
+dt = 0.05
 
 # Pin definition
 
-pendEncoderPin = "DIO0"
-pendEncoderPinB = "DIO1"
-motorEncoderPin = "DIO2"
-motorEncoderPinB = "DIO3"
-motorPWMPin = "DIO4"
-motorDirPin = "DIO5"
+PENDENCODER_PIN = "DIO0"
+PENDENCODER_PINB = "DIO1"
+MOTORENCODER_PIN = "DIO2"
+MOTORENCODER_PINB = "DIO3"
+MOTORPWM_PIN = "DIO4"
+MOTORDIR_PIN = "DIO5"
+
+ULTRASONICTRIG_PIN = "DIO6"
+ULTRASONICECHO_PIN = "DIO7"
 # motorIN1Pin = "DIO6"
 # motorIN2Pin = "DIO7"
 
@@ -45,25 +52,23 @@ handle = ljm.openS("T7", "USB", "ANY")
 # =============================================================================
 
 # Configure encoder pins
-ljm.eWriteName(handle, pendEncoderPin + "_EF_ENABLE", 0)
-ljm.eWriteName(handle, pendEncoderPinB + "_EF_ENABLE", 0)
-ljm.eWriteName(handle, pendEncoderPin + "_EF_INDEX", 10)
-ljm.eWriteName(handle, pendEncoderPinB + "_EF_INDEX", 10)
-ljm.eWriteName(handle, pendEncoderPin + "_EF_ENABLE", 1)
-ljm.eWriteName(handle, pendEncoderPinB + "_EF_ENABLE", 1)
+ljm.eWriteName(handle, PENDENCODER_PIN + "_EF_ENABLE", 0)
+ljm.eWriteName(handle, PENDENCODER_PINB + "_EF_ENABLE", 0)
+ljm.eWriteName(handle, PENDENCODER_PIN + "_EF_INDEX", 10)
+ljm.eWriteName(handle, PENDENCODER_PINB + "_EF_INDEX", 10)
+ljm.eWriteName(handle, PENDENCODER_PIN + "_EF_ENABLE", 1)
+ljm.eWriteName(handle, PENDENCODER_PINB + "_EF_ENABLE", 1)
 
-ljm.eWriteName(handle, motorEncoderPin + "_EF_ENABLE", 0)
-ljm.eWriteName(handle, motorEncoderPinB + "_EF_ENABLE", 0)
-ljm.eWriteName(handle, motorEncoderPin + "_EF_INDEX", 10)
-ljm.eWriteName(handle, motorEncoderPinB + "_EF_INDEX", 10)
-ljm.eWriteName(handle, motorEncoderPin + "_EF_ENABLE", 1)
-ljm.eWriteName(handle, motorEncoderPinB + "_EF_ENABLE", 1)
+ljm.eWriteName(handle, MOTORENCODER_PIN + "_EF_ENABLE", 0)
+ljm.eWriteName(handle, MOTORENCODER_PINB + "_EF_ENABLE", 0)
+ljm.eWriteName(handle, MOTORENCODER_PIN + "_EF_INDEX", 10)
+ljm.eWriteName(handle, MOTORENCODER_PINB + "_EF_INDEX", 10)
+ljm.eWriteName(handle, MOTORENCODER_PIN + "_EF_ENABLE", 1)
+ljm.eWriteName(handle, MOTORENCODER_PINB + "_EF_ENABLE", 1)
 
 
 # Configure DC Motor direction pins (IN1 and IN2)
-# ljm.eWriteName(handle, motorIN1Pin, 0)                                          # Set default spin direction as brake low
-# ljm.eWriteName(handle, motorIN2Pin, 0) 
-ljm.eWriteName(handle,motorDirPin,0)
+ljm.eWriteName(handle,MOTORDIR_PIN,0)
 
 # Configure clock source for PWM output (DC Motor Speed Control)
 rollValue= 80000
@@ -74,11 +79,11 @@ ljm.eWriteName(handle, "DIO_EF_CLOCK0_ENABLE", 1)
 
 # Configure EF Channel Registers 
 PWMDutyCycle = 0                                                                # Default to outputing 0% duty cycle
-ljm.eWriteName(handle, motorPWMPin + "_EF_ENABLE", 0);                          # Disable the EF system for initial configuration
-ljm.eWriteName(handle, motorPWMPin + "_EF_INDEX", 0);                           # Configure EF system for PWM
-ljm.eWriteName(handle, motorPWMPin + "_EF_OPTIONS", 0);                         # Configure what clock source to use: Clock0
-ljm.eWriteName(handle, motorPWMPin + "_EF_CONFIG_A", PWMDutyCycle*rollValue);   # Configure duty cycle to be: 50%
-ljm.eWriteName(handle, motorPWMPin + "_EF_ENABLE", 1);                          # Enable the EF system, PWM wave is now being outputted
+ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_ENABLE", 0);                          # Disable the EF system for initial configuration
+ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_INDEX", 0);                           # Configure EF system for PWM
+ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_OPTIONS", 0);                         # Configure what clock source to use: Clock0
+ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_CONFIG_A", PWMDutyCycle*rollValue);   # Configure duty cycle to be: 50%
+ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_ENABLE", 1);                          # Enable the EF system, PWM wave is now being outputted
 
 
 # Define encoder objects blueprint
@@ -91,14 +96,14 @@ class Encoder:
 
 
 # Instantiate encoder objects
-pendEncoder = Encoder(2000,0,0,pendEncoderPin + "_EF_READ_A_F_AND_RESET")
-motorEncoder = Encoder(3000,0,0,motorEncoderPin + "_EF_READ_A_F_AND_RESET")
+pendEncoder = Encoder(2000,0,0,PENDENCODER_PIN + "_EF_READ_A_F_AND_RESET")
+motorEncoder = Encoder(3000,0,0,MOTORENCODER_PIN + "_EF_READ_A_F_AND_RESET")
 
 
 # =============================================================================
 # Function Definition
 # =============================================================================
-def read_encoder(dt, labjack_handle, encoder_handle):
+def read_encoder(labjack_handle, dt, encoder_handle):
     # This function determine the angular velocity of encoder in RPM
     
     # dt = system time step.
@@ -109,13 +114,13 @@ def read_encoder(dt, labjack_handle, encoder_handle):
 
     # Calculate speed (assuming encoder produces 1600 velocitys per revolution)
     speed_rpm = val / (dt * encoder_handle.res) * 60            # (RPM)
-    speed_rps = val / (dt * encoder_handle.res) * 2 * pi        # (rad/second)
+    speed_rps = val / (dt * encoder_handle.res) * 2 * PI        # (rad/second)
     # speed = val
 
     # return [speed_rpm, speed_rps]
     return speed_rpm, speed_rps
 
-def send_control_actions(u, velCtrlPin, dirPin, labjack_handle):
+def send_control_actions(labjack_handle, u, velCtrlPin, dirPin):
     # u = control action.
     # vel_ctrl_pin = pin to send control to plant, probably DAC1
     # dir_pin = control the direction of the plant, probably DAC0
@@ -130,34 +135,47 @@ def send_control_actions(u, velCtrlPin, dirPin, labjack_handle):
     if u > 0:
         # ljm.eWriteName(handle, dirPin1, 0)
         # ljm.eWriteName(handle, dirPin2, 1)
-        ljm.eWriteName(handle,dirPin,0)
+        ljm.eWriteName(labjack_handle,dirPin,0)
     elif u <= 0:
         # ljm.eWriteName(handle, dirPin1, 1)
         # ljm.eWriteName(handle, dirPin2, 0)
-        ljm.eWriteName(handle,dirPin,1)
+        ljm.eWriteName(labjack_handle,dirPin,1)
     
     # Send control action to velocity control pin
     ljm.eWriteName(labjack_handle, velCtrlPin + "_EF_CONFIG_A", PWMDutyCycle*rollValue)
+    
+def send_trigger_pulse(labjack_handle,trig_pin):
+    ljm.eWriteName(labjack_handle, trig_pin, 1)
+    time.sleep(0.00001)  # 10 microseconds
+    ljm.eWriteName(labjack_handle, trig_pin, 0)
 
-
-
-start_program = time.time()
-u = 5
+def measure_distance(labjack_handle, trig_pin, echo_pin):
+    send_trigger_pulse(labjack_handle,trig_pin)
+    while ljm.eReadName(labjack_handle, echo_pin) == 0:
+        pulse_start = time.time()
+    while ljm.eReadName(labjack_handle, echo_pin) == 1:
+        pulse_end = time.time()
+    pulse_duration = pulse_end - pulse_start
+    distance = (pulse_duration * SPEED_OF_SOUND) / 2
+    return distance
 
 # =============================================================================
 # Control Loop
 # =============================================================================
+
+start_program = time.time()
 while True:
     try:
         start = time.time()
         
         # ========== Obtain data from sensors ========== # 
-        [_,pendEncoder.angularVel] = read_encoder(dt, handle, pendEncoder)
-        [_,motorEncoder.angularVel] = read_encoder(dt, handle, motorEncoder)
+        [_,pendEncoder.angularVel] = read_encoder(handle, dt, pendEncoder)
+        [_,motorEncoder.angularVel] = read_encoder(handle, dt, motorEncoder)
+        position = measure_distance()
         
         # ========== Sensor Data Processing ========== #
-        pendEncoder.angularPos += (pendEncoder.angularVel * dt / math.pi) * 180
-        motorEncoder.angularPos += (motorEncoder.angularVel * dt / math.pi) * 180
+        pendEncoder.angularPos += (pendEncoder.angularVel * dt / PI) * 180
+        motorEncoder.angularPos += (motorEncoder.angularVel * dt / PI) * 180
         
         # ========== Actuation Control ========== #
         # print("Current time: {} | Start time: {}".format(time.time(),start_program))1
@@ -165,10 +183,10 @@ while True:
         u = 1 * math.sin(2*currentTime)
             
 
-        send_control_actions(u, motorPWMPin, motorDirPin, handle)
+        send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
         
         # ========== Data Display (Sanity Checkpoint) ========== #
-        print("Vel_p(rad/s): {:8.2f} | Theta_P (deg): {:8.2f} | Vel_M (rad/s): {:8.2f} | Theta_M (deg): {:8.2f} | Control: {:5.3f}".format(pendEncoder.angularVel,pendEncoder.angularPos,motorEncoder.angularVel,motorEncoder.angularPos,u))
+        print(f"Vel_p(rad/s): {pendEncoder.angularVel:8.2f} | Theta_P (deg): {pendEncoder.angularPos:8.2f} | Vel_M (rad/s): {motorEncoder.angularVel:8.2f} | Theta_M (deg): {motorEncoder.angularPos:8.2f} | Control: {u:5.3f}")
 
         # ========== Data Display (Visualization) ========== #
         
@@ -182,7 +200,7 @@ while True:
     
     except KeyboardInterrupt:
         # Close connection to LabJack T7
-        send_control_actions(0, motorPWMPin, motorDirPin, handle)
+        send_control_actions(handle, 0, MOTORPWM_PIN, MOTORDIR_PIN)
         ljm.close(handle)
 
 
