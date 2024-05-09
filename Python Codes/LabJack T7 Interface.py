@@ -182,32 +182,8 @@ while True:
         # ========== Obtain data from sensors ========== # 
         [_,pendEncoder.angular_vel] = read_encoder(handle, DT, pendEncoder)
         [_,motorEncoder.angular_vel] = read_encoder(handle, DT, motorEncoder)
-        position = measure_distance(handle,ULTRASONICTRIG_PIN,ULTRASONICECHO_PIN) * 100
-        
-        # ========== Sensor Data Processing ========== #
-        pendEncoder.angular_pos += (pendEncoder.angular_vel * DT / PI) * 180
-        motorEncoder.angular_pos += (motorEncoder.angular_vel * DT / PI) * 180
-        
-        # ========== Actuation Control ========== #
-        # print("Current time: {} | Start time: {}".format(time.time(),start_program))1
-        currentTime = time.time() - start_program
-        u = 1 * math.sin(4*currentTime)
-        if (position < 8):
-            u = 0
-            
 
-        send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
-        
-        # ========== Data Display (Sanity Checkpoint) ========== #
-        print(f"Vel_p(rad/s): {pendEncoder.angular_vel:8.2f} |"
-              f"Theta_P (deg): {pendEncoder.angular_pos:8.2f} |"
-              f"Vel_M (rad/s): {motorEncoder.angular_vel:8.2f} |"
-              f"Theta_M (deg): {motorEncoder.angular_pos:8.2f} |"
-              f"Distance (m): {position:8.2f} |"
-              f"Control: {u:5.3f}")
-        # ========== Data Display (Visualization) ========== #
-        
-        
+
         # Ensure each loop takes the same amount of time as the sampling time
         end = time.time()
         # print("Elapsed time: {:.3e}".format(end-start))
