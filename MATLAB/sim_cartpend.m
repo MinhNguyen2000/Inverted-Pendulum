@@ -1,3 +1,8 @@
+% Author: Steve Brunton (adapted by Minh Nguyen)
+% Date: May 23, 2024
+% Description: This MATLAB script simulates the free-response nonlinear 
+% dynamic of the inverted pendulum on a cart system
+
 clear all
 close all
 clc
