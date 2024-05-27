@@ -135,12 +135,9 @@ def send_control_actions(labjack_handle, ctrl_action, vel_ctrl_pin, dir_pin):
     # Send control action to velocity control pin
     ljm.eWriteName(labjack_handle, vel_ctrl_pin + "_EF_CONFIG_A", pwm_duty_cycle*ROLL_VALUE)
     
-
 def send_trigger_pulse(labjack_handle,trig_pin):
     ljm.eWriteName(labjack_handle, trig_pin, 1)
-    start_trig_time = time.time()  # 10 microseconds
-    while time.time() - start_trig_time < 0.000001:
-        pass
+    time.sleep(0.00001)
     ljm.eWriteName(labjack_handle, trig_pin, 0)
 
 def measure_distance(labjack_handle, trig_pin, echo_pin):
@@ -180,9 +177,36 @@ while True:
         start = time.time()
         
         # ========== Obtain data from sensors ========== # 
+        # Encoders
         [_,pendEncoder.angular_vel] = read_encoder(handle, DT, pendEncoder)
         [_,motorEncoder.angular_vel] = read_encoder(handle, DT, motorEncoder)
 
+        # Ultrasonic Sensors
+        position = measure_distance(handle,ULTRASONICTRIG_PIN,ULTRASONICECHO_PIN) * 100
+
+        
+        # ========== Sensor Data Processing ========== # 
+        pendEncoder.angular_pos += (pendEncoder.angular_vel * DT / PI) * 180
+        motorEncoder.angular_pos += (motorEncoder.angular_vel * DT / PI) * 180
+
+        # ========== Sensor Data Display ========== #
+        print(f"Vel_p (rad/s): {pendEncoder.angular_vel:8.2f} |"
+            f"Theta_P (deg): {pendEncoder.angular_pos:8.2f} |"
+            f"Vel_M (rad/s): {motorEncoder.angular_vel:8.2f} |"
+            f"Theta_M (deg): {motorEncoder.angular_pos:8.2f} |"
+            f"Distance (m): {position:8.2f} |"
+            f"Control: {u:5.3f}")
+        
+        # ========== Sensor Data Visualization ========== #
+
+        
+
+        # ========== Control Action Calculation ========== #
+        currentTime = time.time() - start_program
+        u = 1 * math.sin(2 * currentTime)
+
+        # ========== System Actuation ========== #
+        send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
 
         # Ensure each loop takes the same amount of time as the sampling time
         end = time.time()
