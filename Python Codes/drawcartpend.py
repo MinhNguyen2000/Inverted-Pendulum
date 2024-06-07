@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from IPython.display import display, clear_output
 
 def draw_cart_pendulum(y, m, M, L):
     x = y[0]
@@ -43,5 +44,8 @@ def draw_cart_pendulum(y, m, M, L):
     fig.patch.set_facecolor('k')
     fig.patch.set_alpha(1.0)
 
-    plt.draw()
-    plt.show()
+    display(fig)
+    
+    clear_output(wait = True)
+    plt.pause(0.005)
+

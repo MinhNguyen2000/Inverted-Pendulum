@@ -20,6 +20,10 @@ Pin Mapping:
 import time
 import math
 from labjack import ljm
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import numpy as np
+import keyboard
 
 
 # Constant definition
@@ -27,7 +31,7 @@ PI = math.pi
 SPEED_OF_SOUND = 343
 
 # Variable definition
-DT = 0.05
+DT = 0.005
 
 # Pin definition
 
@@ -40,8 +44,6 @@ MOTORDIR_PIN = "DIO5"
 
 ULTRASONICTRIG_PIN = "DIO6"
 ULTRASONICECHO_PIN = "DIO7"
-# motorIN1Pin = "DIO6"
-# motorIN2Pin = "DIO7"
 
 
 # Open connection to LabJack T7
@@ -123,7 +125,7 @@ def send_control_actions(labjack_handle, ctrl_action, vel_ctrl_pin, dir_pin):
     # dir_pin = control the direction of the plant, probably DAC0
     
     # Limit control action within [-4.5, 4.5]
-    ctrl_action = max(min(ctrl_action, 4.5), -4.5)
+    ctrl_action = max(min(ctrl_action, 1.5), -1.5)
     # Determine the required duty cycle of the PWM signal
     pwm_duty_cycle = abs(ctrl_action) / (4.5 - 0)
     # Set direction pin based on control action
@@ -169,27 +171,83 @@ def measure_distance(labjack_handle, trig_pin, echo_pin):
 # =============================================================================
 # Control Loop
 # =============================================================================
+
+count = 0
+last = time.time()
 start_program = time.time()
-send_control_actions(handle, 0, MOTORPWM_PIN, MOTORDIR_PIN)
+print(start_program)
 
+while (time.time() - start_program < 1):
+    send_control_actions(handle, 0, MOTORPWM_PIN, MOTORDIR_PIN)
+
+speed = 0
 while True:
-    try:
-        start = time.time()
-        
-        # ========== Obtain data from sensors ========== # 
-        # Encoders
-        [_,pendEncoder.angular_vel] = read_encoder(handle, DT, pendEncoder)
-        [_,motorEncoder.angular_vel] = read_encoder(handle, DT, motorEncoder)
+    start = time.time()
+    count += 1
+    # ========== Obtain data from sensors ========== # 
+    # Encoders
+    [_,pendEncoder.angular_vel] = read_encoder(handle, DT, pendEncoder)
+    [_,motorEncoder.angular_vel] = read_encoder(handle, DT, motorEncoder)
 
-        # Ultrasonic Sensors
-        position = measure_distance(handle,ULTRASONICTRIG_PIN,ULTRASONICECHO_PIN) * 100
+    # Ultrasonic Sensors
+    position = measure_distance(handle,ULTRASONICTRIG_PIN,ULTRASONICECHO_PIN) * 100
+    # position = 0
+    
+    # ========== Sensor Data Processing ========== # 
+    pendEncoder.angular_pos += (pendEncoder.angular_vel * DT / PI) * 180
+    motorEncoder.angular_pos += (motorEncoder.angular_vel * DT / PI) * 180
 
-        
-        # ========== Sensor Data Processing ========== # 
-        pendEncoder.angular_pos += (pendEncoder.angular_vel * DT / PI) * 180
-        motorEncoder.angular_pos += (motorEncoder.angular_vel * DT / PI) * 180
+    cart_position = motorEncoder.angular_pos / 360 * 0.215
+
+    # ========== Control Action Calculation ========== #
+    currentTime = time.time() - start_program
+
+    # if (abs(cart_position) < 0.50):
+       
+    # else:
+    #     u = 0
+    #     pass
+    Kp = 3
+    u = Kp * (0.5 - abs(cart_position))
+    
+    # u = -1 * math.sin(3 * currentTime)
+    # u = 4.5
+    # u = 0
+
+    # ========== System Actuation ========== #
+    send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
+
+    # ========== Sensor Data Display ========== #
+    print(f"{start - last:.5f} | "
+        f"Step : {count: 4.0f} | "
+        f"Vel_p (rad/s): {pendEncoder.angular_vel:8.2f} |"
+        f"Theta_P (deg): {pendEncoder.angular_pos:8.2f} |"
+        f"Vel_M (rad/s): {motorEncoder.angular_vel:8.2f} |"
+        f"Theta_M (deg): {motorEncoder.angular_pos:8.2f} |"
+        f"Distance (m): {position:5.2f} | "
+        f"Cart Position (m): {cart_position:5.2f} | "
+        f"Control: {u:5.3f}")
+    
+    # speed += motorEncoder.angular_vel
+    # print(f"Average DC Motor Speed: {speed/count:8.2f}")
+    
+    # ========== Sensor Data Visualization ========== #
+
+    # Ensure each loop takes the same amount of time as the sampling time
+    end = time.time()
+    last = end
+    # print("Elapsed time: {:.3e}".format(end-start))
+    while (end - start < DT):
+        end = time.time()
+    # ljm.eWriteName(handle,vel_ctrl_pin,0)
+
+    if (keyboard.is_pressed("q")):
+        # Close connection to LabJack T7
+        u = 0
+        send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
 
         # ========== Sensor Data Display ========== #
+        print("Interupted! Current state log:")
         print(f"Vel_p (rad/s): {pendEncoder.angular_vel:8.2f} |"
             f"Theta_P (deg): {pendEncoder.angular_pos:8.2f} |"
             f"Vel_M (rad/s): {motorEncoder.angular_vel:8.2f} |"
@@ -197,27 +255,6 @@ while True:
             f"Distance (m): {position:8.2f} |"
             f"Control: {u:5.3f}")
         
-        # ========== Sensor Data Visualization ========== #
-
-        
-
-        # ========== Control Action Calculation ========== #
-        currentTime = time.time() - start_program
-        u = 1 * math.sin(2 * currentTime)
-
-        # ========== System Actuation ========== #
-        send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
-
-        # Ensure each loop takes the same amount of time as the sampling time
-        end = time.time()
-        # print("Elapsed time: {:.3e}".format(end-start))
-        while (end - start < DT):
-            end = time.time()
-        # ljm.eWriteName(handle,vel_ctrl_pin,0)
-    
-    except KeyboardInterrupt:
-        # Close connection to LabJack T7
-        send_control_actions(handle, 0, MOTORPWM_PIN, MOTORDIR_PIN)
         ljm.close(handle)
 
 
