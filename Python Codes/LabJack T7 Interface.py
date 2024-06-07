@@ -98,7 +98,7 @@ class Encoder:
 
 # Instantiate encoder objects
 pendEncoder = Encoder(2000,0,0,PENDENCODER_PIN + "_EF_READ_A_F_AND_RESET")
-motorEncoder = Encoder(3000,0,0,MOTORENCODER_PIN + "_EF_READ_A_F_AND_RESET")
+motorEncoder = Encoder(3800,0,0,MOTORENCODER_PIN + "_EF_READ_A_F_AND_RESET")
 
 
 # =============================================================================
@@ -125,7 +125,8 @@ def send_control_actions(labjack_handle, ctrl_action, vel_ctrl_pin, dir_pin):
     # dir_pin = control the direction of the plant, probably DAC0
     
     # Limit control action within [-4.5, 4.5]
-    ctrl_action = max(min(ctrl_action, 1.5), -1.5)
+    ctrl_limit = 3.5
+    ctrl_action = max(min(ctrl_action, ctrl_limit), -ctrl_limit)
     # Determine the required duty cycle of the PWM signal
     pwm_duty_cycle = abs(ctrl_action) / (4.5 - 0)
     # Set direction pin based on control action
@@ -136,6 +137,8 @@ def send_control_actions(labjack_handle, ctrl_action, vel_ctrl_pin, dir_pin):
     
     # Send control action to velocity control pin
     ljm.eWriteName(labjack_handle, vel_ctrl_pin + "_EF_CONFIG_A", pwm_duty_cycle*ROLL_VALUE)
+
+    return ctrl_action
     
 def send_trigger_pulse(labjack_handle,trig_pin):
     ljm.eWriteName(labjack_handle, trig_pin, 1)
@@ -172,89 +175,129 @@ def measure_distance(labjack_handle, trig_pin, echo_pin):
 # Control Loop
 # =============================================================================
 
-count = 0
+# Setup live plotting
+fig, ax = plt.subplots()
+x_data, y_data = [], []
+xDesired_data,yDesired_data = [], []
+line, = ax.plot([], [], 'r-', label = 'Angular position')
+lineDesired, = ax.plot([],[], 'b-', label = 'Desired position')
+
+def init():
+    ax.set_xlim(0, 10)
+    ax.set_ylim(-500, 500)
+    # line.set_data([], [])
+    # lineDesired.set_data([],[])
+    return line, lineDesired
+
+# Initial setup
 last = time.time()
 start_program = time.time()
-print(start_program)
+errorPrev = 360
+uPrev = 0
 
 while (time.time() - start_program < 1):
     send_control_actions(handle, 0, MOTORPWM_PIN, MOTORDIR_PIN)
 
-speed = 0
-while True:
+# Control loop and data collection function
+def update(frame):
+    global count, start_program, uPrev, errorPrev, last
     start = time.time()
-    count += 1
+
     # ========== Obtain data from sensors ========== # 
     # Encoders
     [_,pendEncoder.angular_vel] = read_encoder(handle, DT, pendEncoder)
     [_,motorEncoder.angular_vel] = read_encoder(handle, DT, motorEncoder)
 
-    # Ultrasonic Sensors
-    position = measure_distance(handle,ULTRASONICTRIG_PIN,ULTRASONICECHO_PIN) * 100
-    # position = 0
-    
     # ========== Sensor Data Processing ========== # 
     pendEncoder.angular_pos += (pendEncoder.angular_vel * DT / PI) * 180
     motorEncoder.angular_pos += (motorEncoder.angular_vel * DT / PI) * 180
 
-    cart_position = motorEncoder.angular_pos / 360 * 0.215
+    cart_position = motorEncoder.angular_pos / 360 * 0.205
 
-    # ========== Control Action Calculation ========== #
-    currentTime = time.time() - start_program
+    # ========== Position Setpoint Test ========== # 
+    current_time = time.time() - start_program
+    angleDesired = 360 * np.sin(3 * current_time)
+    # angleDesired = 360q
 
-    # if (abs(cart_position) < 0.50):
-       
-    # else:
-    #     u = 0
-    #     pass
-    Kp = 3
-    u = Kp * (0.5 - abs(cart_position))
-    
-    # u = -1 * math.sin(3 * currentTime)
-    # u = 4.5
+    # Control Action Calculation
+    error = angleDesired - motorEncoder.angular_pos
+    Kp = 0.050
+    Kd = 0.005
+    Ki = 0.001
+
+    u = Kp * error
+    # u = uPrev + (Kp + Ki * DT) * error - Kp * errorPrev
     # u = 0
+    uPrev = u
+    errorPrev = error
 
-    # ========== System Actuation ========== #
-    send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
+    if abs(u) < 0.05:
+        u = 0
+
+
+    # ========== Actuate the motor ========== # 
+    controlActionOut = send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
 
     # ========== Sensor Data Display ========== #
-    print(f"{start - last:.5f} | "
-        f"Step : {count: 4.0f} | "
-        f"Vel_p (rad/s): {pendEncoder.angular_vel:8.2f} |"
-        f"Theta_P (deg): {pendEncoder.angular_pos:8.2f} |"
-        f"Vel_M (rad/s): {motorEncoder.angular_vel:8.2f} |"
-        f"Theta_M (deg): {motorEncoder.angular_pos:8.2f} |"
-        f"Distance (m): {position:5.2f} | "
-        f"Cart Position (m): {cart_position:5.2f} | "
-        f"Control: {u:5.3f}")
+    print(f"{current_time:.5f} | "
+        f"Vel_p (rad/s): {pendEncoder.angular_vel:5.1f} |"
+        f"Theta_P (deg): {pendEncoder.angular_pos:6.1f} |"
+        f"Vel_M (rad/s): {motorEncoder.angular_vel:5.1f} |"
+        f"Theta_M (deg): {motorEncoder.angular_pos:6.1f} |"
+        f"Desired (deg): {angleDesired:6.1f} | "
+        f"Distance (m): {cart_position:5.2f} | "
+        f"Error: {error:6.2f} | "
+        f"Error Prev: {errorPrev:6.2f} | "
+        f"Control In: {u:5.2f} | "
+        f"Control Out: {controlActionOut:5.2f}")
     
     # speed += motorEncoder.angular_vel
     # print(f"Average DC Motor Speed: {speed/count:8.2f}")
     
-    # ========== Sensor Data Visualization ========== #
+    
+    last = time.time()
 
-    # Ensure each loop takes the same amount of time as the sampling time
-    end = time.time()
-    last = end
-    # print("Elapsed time: {:.3e}".format(end-start))
-    while (end - start < DT):
-        end = time.time()
-    # ljm.eWriteName(handle,vel_ctrl_pin,0)
+    # Update data for plot
+    x_data.append(current_time)
+    y_data.append(motorEncoder.angular_pos)
 
-    if (keyboard.is_pressed("q")):
-        # Close connection to LabJack T7
+    xDesired_data.append(current_time)
+    yDesired_data.append(angleDesired)
+
+    line.set_data(x_data, y_data)
+    lineDesired.set_data(xDesired_data,yDesired_data)
+
+    ax.set_xlim(current_time - 10, current_time)  # Adjust the x-axis to display the last 10 seconds
+    ax.figure.canvas.draw()
+
+    if keyboard.is_pressed("q"):
         u = 0
-        send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
-
-        # ========== Sensor Data Display ========== #
+        controlActionOut = send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
         print("Interupted! Current state log:")
-        print(f"Vel_p (rad/s): {pendEncoder.angular_vel:8.2f} |"
-            f"Theta_P (deg): {pendEncoder.angular_pos:8.2f} |"
-            f"Vel_M (rad/s): {motorEncoder.angular_vel:8.2f} |"
-            f"Theta_M (deg): {motorEncoder.angular_pos:8.2f} |"
-            f"Distance (m): {position:8.2f} |"
-            f"Control: {u:5.3f}")
-        
+        print(f"{current_time:.5f} | "
+            f"Vel_p (rad/s): {pendEncoder.angular_vel:5.1f} |"
+            f"Theta_P (deg): {pendEncoder.angular_pos:6.1f} |"
+            f"Vel_M (rad/s): {motorEncoder.angular_vel:5.1f} |"
+            f"Theta_M (deg): {motorEncoder.angular_pos:6.1f} |"
+            f"Desired (deg): {angleDesired:6.1f} | "
+            f"Distance (m): {cart_position:5.2f} | "
+            f"Error: {error:6.2f} | "
+            f"Error Prev: {errorPrev:6.2f} | "
+            f"Control In: {u:5.2f} | "
+            f"Control Out: {controlActionOut:5.2f}")
+    
+        time.sleep(2)
         ljm.close(handle)
+        exit()
+
+    return line, lineDesired
+
+# Animate the live plot and run the control loop
+ani = animation.FuncAnimation(fig, update, frames=np.arange(0, 200), init_func=init, blit=True, interval=DT*1000)
+plt.grid(which = "major", linewidth = 1)
+plt.grid(which = "minor", linewidth = 0.2)
+plt.legend(loc='upper left')
+plt.minorticks_on()
+plt.show()
 
 
