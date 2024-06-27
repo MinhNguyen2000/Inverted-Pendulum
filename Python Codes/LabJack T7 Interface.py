@@ -31,20 +31,20 @@ PI = math.pi
 SPEED_OF_SOUND = 343
 
 # Variable definition
-DT = 0.005
+DT = 0.0025
 
 # Pin definition
-
-PENDENCODER_PIN = "DIO0"
-PENDENCODER_PINB = "DIO1"
-MOTORENCODER_PIN = "DIO2"
+PENDENCODER_PIN =   "DIO0"
+PENDENCODER_PINB =  "DIO1"
+MOTORENCODER_PIN =  "DIO2"
 MOTORENCODER_PINB = "DIO3"
-MOTORPWM_PIN = "DIO4"
-MOTORDIR_PIN = "DIO5"
+MOTORPWM_PIN =      "DIO4"
+MOTORDIR_PIN =      "DIO5"
+LIMIT_SWITCH_PIN =  "DIO6"
 
-ULTRASONICTRIG_PIN = "DIO6"
-ULTRASONICECHO_PIN = "DIO7"
-
+# State definition
+STATE_CURRENT = "Control" # Calibration, Control1, Control2
+STOP_MSG = ""
 
 # Open connection to LabJack T7
 handle = ljm.openS("T7", "USB", "ANY")
@@ -69,7 +69,7 @@ ljm.eWriteName(handle, MOTORENCODER_PIN + "_EF_ENABLE", 1)
 ljm.eWriteName(handle, MOTORENCODER_PINB + "_EF_ENABLE", 1)
 
 
-# Configure DC Motor direction pins (IN1 and IN2)
+# Configure DC Motor direction pins to one direction
 ljm.eWriteName(handle,MOTORDIR_PIN,0)
 
 # Configure clock source for PWM output (DC Motor Speed Control)
@@ -83,7 +83,7 @@ PWM_DUTY_CYCLE = 0   # Default to outputing 0% duty cycle
 ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_ENABLE", 0)   # Disable EF for initial configuration
 ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_INDEX", 0)    # Configure EF system for PWM
 ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_OPTIONS", 0)  # Configure clock source = Clock0
-ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_CONFIG_A", PWM_DUTY_CYCLE*ROLL_VALUE) # Duty cycle = 50%
+ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_CONFIG_A", PWM_DUTY_CYCLE*ROLL_VALUE) # Duty cycle = 0%
 ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_ENABLE", 1)   # Enable EF, PWM outputted
 
 
@@ -104,6 +104,10 @@ motorEncoder = Encoder(3800,0,0,MOTORENCODER_PIN + "_EF_READ_A_F_AND_RESET")
 # =============================================================================
 # Function Definition
 # =============================================================================
+def read_limitswitch(labjack_handle, limitswitch_pin):
+    val = ljm.eReadName(labjack_handle,limitswitch_pin)
+    return val
+
 def read_encoder(labjack_handle, dt, encoder_handle):
     # This function determine the angular velocity of encoder in RPM
     # DT = system time step.
@@ -171,9 +175,26 @@ def measure_distance(labjack_handle, trig_pin, echo_pin):
     distance = (pulse_duration * SPEED_OF_SOUND) / 2
     return distance
 
-# =============================================================================
-# Control Loop
-# =============================================================================
+def stop_program():
+    u = 0
+    controlActionOut = send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
+    print(f"{STOP_MSG}! Current state log:")
+    print(f"{current_time:.5f} | "
+        f"Switch: {limitSwitch_state:1.0f} | "
+        f"Vel_p (rad/s): {pendEncoder.angular_vel:6.1f} |"
+        f"Theta_P (deg): {pendEncoder.angular_pos:6.1f} |"
+        f"Vel_M (rad/s): {motorEncoder.angular_vel:6.1f} |"
+        f"Theta_M (deg): {motorEncoder.angular_pos:6.1f} |"
+        f"Desired (deg): {angleDesired:6.1f} | "
+        f"Distance (m): {cart_position:5.2f} | "
+        # f"Error: {error:6.2f} | "
+        # f"Error Prev: {errorPrev:6.2f} | "
+        f"Control In: {u:5.2f} | "
+        f"Control Out: {controlActionOut:5.2f}")
+
+    time.sleep(2)
+    ljm.close(handle)
+    exit()
 
 # Setup live plotting
 fig, ax = plt.subplots()
@@ -198,12 +219,18 @@ uPrev = 0
 while (time.time() - start_program < 1):
     send_control_actions(handle, 0, MOTORPWM_PIN, MOTORDIR_PIN)
 
-# Control loop and data collection function
+# Control loop and data collection function.
+# This function is used with an animation.FuncAnimation() function to collect the data, create a live plot, and actuate the motor
 def update(frame):
     global count, start_program, uPrev, errorPrev, last
+    global current_time,limitSwitch_state, angleDesired,cart_position
+    global STATE_CURRENT, STOP_MSG
     start = time.time()
 
     # ========== Obtain data from sensors ========== # 
+    # Limit Switch
+    limitSwitch_state = read_limitswitch(handle,LIMIT_SWITCH_PIN)
+
     # Encoders
     [_,pendEncoder.angular_vel] = read_encoder(handle, DT, pendEncoder)
     [_,motorEncoder.angular_vel] = read_encoder(handle, DT, motorEncoder)
@@ -234,20 +261,20 @@ def update(frame):
     if abs(u) < 0.05:
         u = 0
 
-
     # ========== Actuate the motor ========== # 
     controlActionOut = send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
 
     # ========== Sensor Data Display ========== #
     print(f"{current_time:.5f} | "
-        f"Vel_p (rad/s): {pendEncoder.angular_vel:5.1f} |"
+        f"Switch: {limitSwitch_state:1.0f} | "
+        f"Vel_p (rad/s): {pendEncoder.angular_vel:6.1f} |"
         f"Theta_P (deg): {pendEncoder.angular_pos:6.1f} |"
-        f"Vel_M (rad/s): {motorEncoder.angular_vel:5.1f} |"
+        f"Vel_M (rad/s): {motorEncoder.angular_vel:6.1f} |"
         f"Theta_M (deg): {motorEncoder.angular_pos:6.1f} |"
         f"Desired (deg): {angleDesired:6.1f} | "
         f"Distance (m): {cart_position:5.2f} | "
-        f"Error: {error:6.2f} | "
-        f"Error Prev: {errorPrev:6.2f} | "
+        # f"Error: {error:6.2f} | "
+        # f"Error Prev: {errorPrev:6.2f} | "
         f"Control In: {u:5.2f} | "
         f"Control Out: {controlActionOut:5.2f}")
     
@@ -267,33 +294,30 @@ def update(frame):
     line.set_data(x_data, y_data)
     lineDesired.set_data(xDesired_data,yDesired_data)
 
-    ax.set_xlim(current_time - 10, current_time)  # Adjust the x-axis to display the last 10 seconds
+    ax.set_xlim(current_time - 20, current_time)  # Adjust the x-axis to display the last 10 seconds
     ax.figure.canvas.draw()
 
+    if limitSwitch_state == 0:
+        STATE_CURRENT = "Stopped"
+        STOP_MSG = "Limit switch interruption"
+        stop_program()
+
     if keyboard.is_pressed("q"):
-        u = 0
-        controlActionOut = send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
-        print("Interupted! Current state log:")
-        print(f"{current_time:.5f} | "
-            f"Vel_p (rad/s): {pendEncoder.angular_vel:5.1f} |"
-            f"Theta_P (deg): {pendEncoder.angular_pos:6.1f} |"
-            f"Vel_M (rad/s): {motorEncoder.angular_vel:5.1f} |"
-            f"Theta_M (deg): {motorEncoder.angular_pos:6.1f} |"
-            f"Desired (deg): {angleDesired:6.1f} | "
-            f"Distance (m): {cart_position:5.2f} | "
-            f"Error: {error:6.2f} | "
-            f"Error Prev: {errorPrev:6.2f} | "
-            f"Control In: {u:5.2f} | "
-            f"Control Out: {controlActionOut:5.2f}")
-    
-        time.sleep(2)
-        ljm.close(handle)
-        exit()
+        STATE_CURRENT = "Stopped"
+        STOP_MSG = "Keyboard interruption"
+        stop_program()
+
+        
 
     return line, lineDesired
 
-# Animate the live plot and run the control loop
+# =============================================================================
+# Control Loop
+# =============================================================================
+
+
 ani = animation.FuncAnimation(fig, update, frames=np.arange(0, 200), init_func=init, blit=True, interval=DT*1000)
+print('Hey')
 plt.grid(which = "major", linewidth = 1)
 plt.grid(which = "minor", linewidth = 0.2)
 plt.legend(loc='upper left')
