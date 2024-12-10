@@ -88,31 +88,37 @@ ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_CONFIG_A", PWM_DUTY_CYCLE*ROLL_VALUE)
 ljm.eWriteName(handle, MOTORPWM_PIN + "_EF_ENABLE", 1)   # Enable EF, PWM outputted
 
 
-# Define encoder objects blueprint
+# Define encoder class
 class Encoder:
-    def __init__(self, resolution, angular_pos, angular_vel, encoder_pin):
-        self.res = resolution # (pulse per revolution - PPR)
-        self.angular_pos = angular_pos # (rad)
-        self.angular_vel = angular_vel # (rad/s)
-        self.pin = encoder_pin
+    def __init__(self, resolution, encoder_pin, angular_pos = 0, angular_vel = 0):
+        self.res = resolution               # (pulse per revolution - PPR)
+        self.pin = encoder_pin              # the pin that reads encoder output
+        self.angular_pos = angular_pos      # angular position (rad) - initialized as 0
+        self.angular_vel = angular_vel      # angular velovity (rad/s) - initialized as 0
 
 
 # Instantiate encoder objects
-pendEncoder = Encoder(2000,0,0,PENDENCODER_PIN + "_EF_READ_A_F_AND_RESET")
-motorEncoder = Encoder(3800,0,0,MOTORENCODER_PIN + "_EF_READ_A_F_AND_RESET")
+pendEncoder = Encoder(2000,PENDENCODER_PIN + "_EF_READ_A_F_AND_RESET")
+motorEncoder = Encoder(3800,MOTORENCODER_PIN + "_EF_READ_A_F_AND_RESET")
 
 
 # =============================================================================
 # Function Definition
 # =============================================================================
 def read_limitswitch(labjack_handle, limitswitch_pin):
+    '''
+    Function for reading the digital output of the limit switches
+    '''
     val = ljm.eReadName(labjack_handle,limitswitch_pin)
     return val
 
 def read_encoder(labjack_handle, dt, encoder_handle):
-    # This function determine the angular velocity of encoder in RPM
-    # DT = system time step.
-
+    ''' This function determine the angular velocity of encoder in RPM
+    Parameters:
+    - labjack_handle: the handle for the LabJack object
+    - dt: sampling time
+    - encoder_handle: the encoder object to read
+    '''
     # Read encoder value
     val = ljm.eReadName(labjack_handle, encoder_handle.pin)/4
 
@@ -146,6 +152,7 @@ def send_control_actions(labjack_handle, ctrl_action, vel_ctrl_pin, dir_pin):
     return ctrl_action
 
 def stop_program():
+    # Send zero volt to the motor
     u = 0
     controlActionOut = send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
     print(f"{STOP_MSG}! Current state log:")
