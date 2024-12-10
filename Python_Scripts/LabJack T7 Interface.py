@@ -13,8 +13,8 @@ Pin Mapping:
     FIO4: PWM output for DC motor speed control
     FIO5: Direction output to contorl direction of the the motor on the MD10C board
     
-    FIO6: Trigger signal (digital output) of the ultrasonic sensor
-    FIO7: Echo signal (digital input) of the ultrasonic sensor
+    FIO6: Digital pin of the limit switch closer to the motor
+    FIO7: Digital pin of the limit switch further away from the motor
 
 """
 import time
@@ -34,16 +34,17 @@ SPEED_OF_SOUND = 343
 DT = 0.0025
 
 # Pin definition
-PENDENCODER_PIN =   "DIO0"
-PENDENCODER_PINB =  "DIO1"
-MOTORENCODER_PIN =  "DIO2"
-MOTORENCODER_PINB = "DIO3"
-MOTORPWM_PIN =      "DIO4"
-MOTORDIR_PIN =      "DIO5"
-LIMIT_SWITCH_PIN =  "DIO6"
+PENDENCODER_PIN     =   "DIO0"
+PENDENCODER_PINB    =   "DIO1"
+MOTORENCODER_PIN    =   "DIO2"
+MOTORENCODER_PINB   =   "DIO3"
+MOTORPWM_PIN        =   "DIO4"
+MOTORDIR_PIN        =   "DIO5"
+LIMIT_SWITCH1_PIN   =   "DIO6"      # The limit switch closer to the motor
+LIMIT_SWITCH2_PIN   =   "DIO7"      # The limit switch further from the motor
 
 # State definition
-STATE_CURRENT = "Control" # Calibration, Control1, Control2
+STATE_CURRENT = "startup"           
 STOP_MSG = ""
 
 # Open connection to LabJack T7
@@ -143,37 +144,6 @@ def send_control_actions(labjack_handle, ctrl_action, vel_ctrl_pin, dir_pin):
     ljm.eWriteName(labjack_handle, vel_ctrl_pin + "_EF_CONFIG_A", pwm_duty_cycle*ROLL_VALUE)
 
     return ctrl_action
-    
-def send_trigger_pulse(labjack_handle,trig_pin):
-    ljm.eWriteName(labjack_handle, trig_pin, 1)
-    time.sleep(0.00001)
-    ljm.eWriteName(labjack_handle, trig_pin, 0)
-
-def measure_distance(labjack_handle, trig_pin, echo_pin):
-    send_trigger_pulse(labjack_handle,trig_pin)
-    # print("Pulse sent")
-    time_out = 0.038
-
-    pulse_start = time.time()
-    pulse_timeout = pulse_start + time_out
-    while ljm.eReadName(labjack_handle, echo_pin) == 0 and time.time() < pulse_timeout:
-        pulse_start = time.time()
-    # print(f"Echo high {pulse_start}")
-    if time.time() >= pulse_timeout:
-        return 0
-
-    pulse_start = time.time()
-    pulse_end = time.time()
-    while ljm.eReadName(labjack_handle, echo_pin) == 1 and time.time() < pulse_timeout:
-        pulse_end = time.time()
-    # print(f"Echo low {pulse_end}")
-    
-    if time.time() >= pulse_timeout:
-        return 0
-
-    pulse_duration = pulse_end - pulse_start
-    distance = (pulse_duration * SPEED_OF_SOUND) / 2
-    return distance
 
 def stop_program():
     u = 0
@@ -229,7 +199,7 @@ def update(frame):
 
     # ========== Obtain data from sensors ========== # 
     # Limit Switch
-    limitSwitch_state = read_limitswitch(handle,LIMIT_SWITCH_PIN)
+    limitSwitch_state = read_limitswitch(handle,LIMIT_SWITCH1_PIN)
 
     # Encoders
     [_,pendEncoder.angular_vel] = read_encoder(handle, DT, pendEncoder)
