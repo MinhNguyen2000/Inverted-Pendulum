@@ -263,23 +263,23 @@ def calibration_process(labjack_handle,
 
     print("Starting calibration...")
 
-    # Move the cart to the first limit switch
-    print("Moving to the first limit switch...")
-    motor.send_control_actions(labjack_handle, +1.0)
+    # # Move the cart to the first limit switch
+    # print("Moving to the first limit switch...")
+    # motor.send_control_actions(labjack_handle, +1.0)
 
-    while True:
-        # Read limit switch states
-        switch_states = read_limitswitches(labjack_handle, limit_switch_pins)
+    # while True:
+    #     # Read limit switch states
+    #     switch_states = read_limitswitches(labjack_handle, limit_switch_pins)
 
-        # Exit loop if the first limit switch is press (value = 0.0)
-        if not(switch_states[1]):    # Limit switch further from the motor
-            print("First limit switch triggered.")
-            motor.send_control_actions(labjack_handle,0)
-            break
+    #     # Exit loop if the first limit switch is press (value = 0.0)
+    #     if not(switch_states[1]):    # Limit switch further from the motor
+    #         print("First limit switch triggered.")
+    #         motor.send_control_actions(labjack_handle,0)
+    #         break
 
-        # # Read and process sensor data for debugging or monitoring
-        # sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
-        # print(f"Cart position: {sensor_data['cart_position']:.2f}m | Switches: {switch_states}")
+    #     # # Read and process sensor data for debugging or monitoring
+    #     sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
+    #     print(f"Cart position: {sensor_data['cart_position']:.2f}m | Switches: {switch_states}")
 
     # Move the cart to the second limit switch    
     print("Moving to the second limit switch...")
@@ -297,12 +297,12 @@ def calibration_process(labjack_handle,
             break
 
         # # Read and process sensor data for debugging or monitoring
-        # sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
-        # print(f"Cart position: {sensor_data['cart_position']:.2f} m | Switches: {switch_states}")
+        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
+        print(f"Cart position: {sensor_data['cart_position']:.2f} m | Switches: {switch_states}")
 
     # Move the cart to the middle position
     motor.send_control_actions(labjack_handle, +1.0)
-    center_position = 1.25/2
+    center_position = 1.25/2-0.04
 
     while True:
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
@@ -318,6 +318,13 @@ def calibration_process(labjack_handle,
                     )
             motor.send_control_actions(labjack_handle,0)
             break
+
+        print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
+                f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
+                f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
+                f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
+                f"Distance (m): {sensor_data['cart_position']:5.2f} | "
+            )
     
     print("Calibration complete.")
 
@@ -325,7 +332,7 @@ def calibration_process(labjack_handle,
 
 def stop_program(labjack_handle, motor: Motor):
     # Send zero volt to the motor
-    controlActionOut = motor.send_control_actions(labjack_handle, 0)
+    motor.send_control_actions(labjack_handle, 0)
 
     time.sleep(2)
     ljm.close(labjack_handle)
@@ -366,7 +373,7 @@ def main():
                 case 'idle':            # if not in the process of anything, ask user for input
                     current_state = get_user_input()
                 case 'calibration':
-                    calibration_process(labjack_handle=handle, 
+                    current_state = calibration_process(labjack_handle=handle, 
                                         pendEncoder=pendEncoder, motorEncoder=motorEncoder,
                                         motor=motor,
                                         limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCH2_PIN])
@@ -391,7 +398,7 @@ def main():
                     )
             
     except KeyboardInterrupt:
-        stop_program()
+        stop_program(handle,motor)
         pass
 
     finally: 
