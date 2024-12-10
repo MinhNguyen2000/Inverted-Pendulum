@@ -187,13 +187,65 @@ def read_limitswitch(labjack_handle, limitswitch_pin):
     val = ljm.eReadName(labjack_handle,limitswitch_pin)
     return val
 
+def read_and_process_sensors(handle, pendEncoder, motorEncoder, dt):
+    """
+    Reads and processes data from pendulum and motor encoders.
+    
+    Parameters:
+        handle: LabJack handle for communication.
+        pendEncoder: Encoder object for the pendulum.
+        motorEncoder: Encoder object for the motor.
+        dt: Time step for reading encoders.
+        
+    Returns:
+        dict: Processed sensor data including angular velocities, positions, and cart position.
+    """
+    # Read encoder data
+    [_, pendEncoder.angular_vel] = pendEncoder.read_encoder(handle, dt=dt)
+    [_, motorEncoder.angular_vel] = motorEncoder.read_encoder(handle, dt=dt)
+    
+    # Process angular positions
+    pendEncoder.angular_pos += (pendEncoder.angular_vel * dt / PI) * 180
+    motorEncoder.angular_pos += (motorEncoder.angular_vel * dt / PI) * 180
+
+    # Calculate cart position
+    cart_position = motorEncoder.angular_pos / 360 * 0.205
+
+    # Return processed data
+    return {
+        "pendulum_angular_vel": pendEncoder.angular_vel,
+        "pendulum_angular_pos": pendEncoder.angular_pos,
+        "motor_angular_vel": motorEncoder.angular_vel,
+        "motor_angular_pos": motorEncoder.angular_pos,
+        "cart_position": cart_position,
+    }
+
+# =============================================================================
+# User Interaction Functions
+# =============================================================================
+
+def get_user_input():
+    inputs = {
+        "1": "calibration",
+        "2": "balance",
+        "3": "swing up"
+    }
+
+    print("\nPossible states for the inverted pendulum system")
+    for key, value in inputs.items():
+        print(f"{key}. {value}")    
+    while True:
+        user_input = input("Enter the number corresponding to your choice: ").strip()
+        if user_input in inputs:
+            return inputs[user_input]
+        else: 
+            print("Invalid input. please enter a number from the list")
 
 # =============================================================================
 # Main Program
 # =============================================================================
 
 def main():
-    global current_state
     handle = initialize_labjack()
 
     # Instantiate and initialize the sensors/actuators
@@ -211,28 +263,24 @@ def main():
 
     motor = Motor(motorpwm_pin=MOTORPWM_PIN,
                   motordir_pin=MOTORDIR_PIN)
-    motor.intialize_motor()
+    motor.intialize_motor(handle)
 
-    
+
     # Main control loop
     try:
         while True:
-            [_,pendEncoder.angular_vel] = pendEncoder.read_encoder(handle, dt=DT)
-            [_,motorEncoder.angular_vel] = motorEncoder.read_encoder(handle, dt=DT)
+            current_state = get_user_input()
 
-            # ========== Sensor Data Processing ========== # 
-            pendEncoder.angular_pos += (pendEncoder.angular_vel * DT / PI) * 180
-            motorEncoder.angular_pos += (motorEncoder.angular_vel * DT / PI) * 180
-
-            cart_position = motorEncoder.angular_pos / 360 * 0.205
-
-            # ========== Sensor Data Display ========== #
-            print(f"Vel_p (rad/s): {pendEncoder.angular_vel:6.1f} |"
-                f"Theta_P (deg): {pendEncoder.angular_pos:6.1f} |"
-                f"Vel_M (rad/s): {motorEncoder.angular_vel:6.1f} |"
-                f"Theta_M (deg): {motorEncoder.angular_pos:6.1f} |"
-                f"Distance (m): {cart_position:5.2f} | "
-            )
+            match current_state:
+                case 'calibration':
+                    read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
+                    pass
+                case 'balance':
+                    read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
+                    pass
+                case 'swing up':
+                    read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
+                    pass
             
     except KeyboardInterrupt:
         pass
