@@ -265,7 +265,7 @@ def calibration_process(labjack_handle,
 
     # Move the cart to the first limit switch
     print("Moving to the first limit switch...")
-    motor.send_control_actions(labjack_handle, -1.0)
+    motor.send_control_actions(labjack_handle, +1.0)
 
     while True:
         # Read limit switch states
@@ -277,14 +277,13 @@ def calibration_process(labjack_handle,
             motor.send_control_actions(labjack_handle,0)
             break
 
-        # Read and process sensor data for debugging or monitoring
-        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
-        print(f"Cart position: {sensor_data['cart_position']:.2f}m | Switches: {switch_states}")
+        # # Read and process sensor data for debugging or monitoring
+        # sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
+        # print(f"Cart position: {sensor_data['cart_position']:.2f}m | Switches: {switch_states}")
 
     # Move the cart to the second limit switch    
     print("Moving to the second limit switch...")
-
-    motor.send_control_actions(labjack_handle, +1.0)
+    motor.send_control_actions(labjack_handle, -1.0)
 
     while True:
         # Read limit switch states
@@ -294,11 +293,39 @@ def calibration_process(labjack_handle,
         if not(switch_states[0]):  # Limit switch closer to the motor
             print("Second limit switch triggered.")
             motor.send_control_actions(labjack_handle,0)
+            motorEncoder.angular_pos = 0                    # Reset the motor encoder position
             break
 
-        # Read and process sensor data for debugging or monitoring
+        # # Read and process sensor data for debugging or monitoring
+        # sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
+        # print(f"Cart position: {sensor_data['cart_position']:.2f} m | Switches: {switch_states}")
+
+    # Move the cart to the middle position
+    motor.send_control_actions(labjack_handle, +1.0)
+    center_position = 1.25/2
+
+    while True:
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
-        print(f"Cart position: {sensor_data['cart_position']:.2f} m | Switches: {switch_states}")
+
+        # Stop if the cart is at the center position
+        if abs(sensor_data['cart_position'] - center_position) < 0.01:  # Example threshold
+            print("Cart centered.")
+            print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
+                        f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
+                        f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
+                        f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
+                        f"Distance (m): {sensor_data['cart_position']:5.2f} | "
+                    )
+            motor.send_control_actions(labjack_handle,0)
+            break
+    
+    print("Calibration complete.")
+
+    return "idle"
+
+
+        
+    
 
 # =============================================================================
 # Main Program
@@ -328,9 +355,9 @@ def main():
     # Main control loop
     try:
         while True:
-            current_state = get_user_input()
-
             match current_state:
+                case 'idle':            # if not in the process of anything, ask user for input
+                    current_state = get_user_input()
                 case 'calibration':
                     calibration_process(labjack_handle=handle, 
                                         pendEncoder=pendEncoder, motorEncoder=motorEncoder,
