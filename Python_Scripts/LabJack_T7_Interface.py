@@ -230,7 +230,8 @@ def get_user_input():
     inputs = {
         "1": "calibration",
         "2": "balance",
-        "3": "swing up"
+        "3": "swing up",
+        "9": "state report"
     }
 
     print("\nPossible states for the inverted pendulum system")
@@ -339,25 +340,21 @@ def main():
                 case 'balance':
                     sensor_data = read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
                     
-                    # # Display sensor data
-                    # print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
-                    #     f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
-                    #     f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
-                    #     f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
-                    #     f"Distance (m): {sensor_data['cart_position']:5.2f} | "
-                    # )
                     pass
                 case 'swing up':
                     sensor_data = read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
                     
-                    # # Display sensor data
-                    # print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
-                    #     f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
-                    #     f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
-                    #     f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
-                    #     f"Distance (m): {sensor_data['cart_position']:5.2f} | "
-                    # )
                     pass
+                case 'state report':
+                    sensor_data = read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
+                    
+                    # Display sensor data
+                    print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
+                        f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
+                        f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
+                        f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
+                        f"Distance (m): {sensor_data['cart_position']:5.2f} | "
+                    )
             
     except KeyboardInterrupt:
         pass
