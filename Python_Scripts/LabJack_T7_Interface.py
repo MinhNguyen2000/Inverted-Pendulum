@@ -180,14 +180,16 @@ class Motor:
 # =============================================================================
 # Low-level Sensor and Actuator Control Functions
 # =============================================================================
-def read_limitswitch(labjack_handle, limitswitch_pin):
+def read_limitswitches(labjack_handle, limitswitch_pins):
     '''
     Function for reading the digital output of the limit switches
     '''
-    val = ljm.eReadName(labjack_handle,limitswitch_pin)
+    val = []
+    for pin in limitswitch_pins:
+        val.append(ljm.eReadName(labjack_handle,pin))
     return val
 
-def read_and_process_sensors(handle, pendEncoder, motorEncoder, dt):
+def read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt):
     """
     Reads and processes data from pendulum and motor encoders.
     
@@ -201,8 +203,8 @@ def read_and_process_sensors(handle, pendEncoder, motorEncoder, dt):
         dict: Processed sensor data including angular velocities, positions, and cart position.
     """
     # Read encoder data
-    [_, pendEncoder.angular_vel] = pendEncoder.read_encoder(handle, dt=dt)
-    [_, motorEncoder.angular_vel] = motorEncoder.read_encoder(handle, dt=dt)
+    [_, pendEncoder.angular_vel] = pendEncoder.read_encoder(labjack_handle, dt=dt)
+    [_, motorEncoder.angular_vel] = motorEncoder.read_encoder(labjack_handle, dt=dt)
     
     # Process angular positions
     pendEncoder.angular_pos += (pendEncoder.angular_vel * dt / PI) * 180
@@ -242,6 +244,62 @@ def get_user_input():
             print("Invalid input. please enter a number from the list")
 
 # =============================================================================
+# State Functions
+# =============================================================================
+def calibration_process(labjack_handle, 
+                        pendEncoder: Encoder, motorEncoder: Encoder, 
+                        motor: Motor, limit_switch_pins):
+    """
+    Calibration function to move the cart to the limit switches and center it.
+    
+    Parameters:
+        handle: LabJack handle for communication.
+        pendEncoder: Encoder object for the pendulum.
+        motorEncoder: Encoder object for the motor.
+        motor: Motor object to control the cart.
+        limit_switch_pins: List of digital pins connected to limit switches.
+    """
+
+    print("Starting calibration...")
+
+    # Move the cart to the first limit switch
+    print("Moving to the first limit switch...")
+    motor.send_control_actions(labjack_handle, -1.0)
+
+    while True:
+        # Read limit switch states
+        switch_states = read_limitswitches(labjack_handle, limit_switch_pins)
+
+        # Exit loop if the first limit switch is press (value = 0.0)
+        if not(switch_states[1]):    # Limit switch further from the motor
+            print("First limit switch triggered.")
+            motor.send_control_actions(labjack_handle,0)
+            break
+
+        # Read and process sensor data for debugging or monitoring
+        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
+        print(f"Cart position: {sensor_data['cart_position']:.2f}m | Switches: {switch_states}")
+
+    # Move the cart to the second limit switch    
+    print("Moving to the second limit switch...")
+
+    motor.send_control_actions(labjack_handle, +1.0)
+
+    while True:
+        # Read limit switch states
+        switch_states = read_limitswitches(labjack_handle, limit_switch_pins)
+
+        # Exit loop if the first limit switch is pressed (value = 0.0)
+        if not(switch_states[0]):  # Limit switch closer to the motor
+            print("Second limit switch triggered.")
+            motor.send_control_actions(labjack_handle,0)
+            break
+
+        # Read and process sensor data for debugging or monitoring
+        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
+        print(f"Cart position: {sensor_data['cart_position']:.2f} m | Switches: {switch_states}")
+
+# =============================================================================
 # Main Program
 # =============================================================================
 
@@ -273,37 +331,32 @@ def main():
 
             match current_state:
                 case 'calibration':
-                    sensor_data = read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
-                    
-                    # Display sensor data
-                    print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
-                        f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
-                        f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
-                        f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
-                        f"Distance (m): {sensor_data['cart_position']:5.2f} | "
-                    )
+                    calibration_process(labjack_handle=handle, 
+                                        pendEncoder=pendEncoder, motorEncoder=motorEncoder,
+                                        motor=motor,
+                                        limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCH2_PIN])
                     pass
                 case 'balance':
                     sensor_data = read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
                     
-                    # Display sensor data
-                    print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
-                        f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
-                        f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
-                        f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
-                        f"Distance (m): {sensor_data['cart_position']:5.2f} | "
-                    )
+                    # # Display sensor data
+                    # print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
+                    #     f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
+                    #     f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
+                    #     f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
+                    #     f"Distance (m): {sensor_data['cart_position']:5.2f} | "
+                    # )
                     pass
                 case 'swing up':
                     sensor_data = read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
                     
-                    # Display sensor data
-                    print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
-                        f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
-                        f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
-                        f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
-                        f"Distance (m): {sensor_data['cart_position']:5.2f} | "
-                    )
+                    # # Display sensor data
+                    # print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
+                    #     f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
+                    #     f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
+                    #     f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
+                    #     f"Distance (m): {sensor_data['cart_position']:5.2f} | "
+                    # )
                     pass
             
     except KeyboardInterrupt:
