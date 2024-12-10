@@ -323,26 +323,12 @@ def calibration_process(labjack_handle,
 
     return "idle"
 
-def stop_program():
+def stop_program(labjack_handle, motor: Motor):
     # Send zero volt to the motor
-    u = 0
-    controlActionOut = send_control_actions(handle, u, MOTORPWM_PIN, MOTORDIR_PIN)
-    print(f"{STOP_MSG}! Current state log:")
-    print(f"{current_time:.5f} | "
-        f"Switch: {limitSwitch_state:1.0f} | "
-        f"Vel_p (rad/s): {pendEncoder.angular_vel:6.1f} |"
-        f"Theta_P (deg): {pendEncoder.angular_pos:6.1f} |"
-        f"Vel_M (rad/s): {motorEncoder.angular_vel:6.1f} |"
-        f"Theta_M (deg): {motorEncoder.angular_pos:6.1f} |"
-        f"Desired (deg): {angleDesired:6.1f} | "
-        f"Distance (m): {cart_position:5.2f} | "
-        # f"Error: {error:6.2f} | "
-        # f"Error Prev: {errorPrev:6.2f} | "
-        f"Control In: {u:5.2f} | "
-        f"Control Out: {controlActionOut:5.2f}")
+    controlActionOut = motor.send_control_actions(labjack_handle, 0)
 
     time.sleep(2)
-    ljm.close(handle)
+    ljm.close(labjack_handle)
     exit()
         
     
