@@ -342,24 +342,38 @@ def calibration_process(labjack_handle,
 
     return "idle"
 
-def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, cart: Cart, limit_switch_pins):
+def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, cart: Cart, limit_switch_pins, dt=DT):
     print("Starting balancing state from the top position")
 
     print(f"Please move the pendulum to within {angle_setup_threshold} degrees of the top position")
+    print("Once the desired starting position is reached, press 's' to start balancing")
 
-    # Wait for the user to bring the pendulum to approximately 180 deg
-    sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
-    while abs(sensor_data['P_angular_pos'] - 180) > angle_setup_threshold:
-        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
-        current_state = "waiting input"
+    user_ready = False
+    within_range = False
 
-    while current_state == "waiting input":
-        balance_input = input("Is the pendulum at the desired position [Yes/No]: ")
-        yes_list = ['yes', 'y']
-        if balance_input.lower() in yes_list:
-            current_state = "balance process"
+    while not user_ready:
+        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt)
+        
+        is_in_range = abs(abs(sensor_data['P_angular_pos']) - 180) <= angle_setup_threshold
 
-    print("Thank you")
+        # Check if the pendulum is within the setup threshold
+        if is_in_range:
+            if within_range:
+                print("Pendulum is within the acceptable range. Hold it steady.")
+                within_range = True
+        else:
+            if within_range:
+                # Notify the user when the pendulum drops outside the acceptable range
+                print("Pendulum is outside the acceptable range! Please adjust it back.")
+            within_range = False
+
+        # Check for user input to start balancing
+        if within_range and keyboard.is_pressed('s'):  # User presses 's' to start balancing
+            user_ready = True
+
+        time.sleep(0.1)  # Allow time for user to respond
+
+    print("User confirmed start of balancing. Beginning control process.")
     # while current_state == "balance_process":
     #     sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
         
