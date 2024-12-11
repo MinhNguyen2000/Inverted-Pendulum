@@ -49,7 +49,7 @@ angle_balance_threshold = 30        # Threshold for active control
 cart_position_threshold = 0.50      # Threshold for active control. If difference between cart position and desired position outside this range, stop control.
 
 # State definition
-current_state = "startup"
+current_state = 'idle'
 
 
 # =============================================================================
@@ -269,11 +269,13 @@ def on_key_press(key):
     """
     Handle key presses to set the system state.
     """
-    global user_ready
+    global user_ready, current_state
     try:
         if key.char == 's' and within_range:  # 's' starts balancing only when within range
             user_ready = True
             print("[INFO] User confirmed start of balancing.")
+        if key.char == 'q':
+            current_state = 'idle'
     except AttributeError:
         pass  # Handle special keys like Shift, etc.
 
@@ -374,7 +376,7 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
     print("Once the desired starting position is reached, press 's' to start balancing")
 
     start_keyboard_listener()
-
+    print(f"Current state 1: {current_state}")
     while not user_ready:
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt)
         
@@ -395,20 +397,22 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
 
     user_ready = False  # Reset this flag for future balances
     print("Beginning control process.")
+    print(f"Current state 2: {current_state}")
     
-    # while current_state == "balance_process":
-    #     sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+    while current_state == 'balance':
+        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
         
-    #     # Emergency stop cases
-    #     # if (abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold):
-    #     #     print("Control failed - Exceed pendulum angle limit")
-    #     #     current_state = "idle"
-    #     #     break
+        # Emergency stop cases
+        if (abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold):
+            print("Control failed - Exceed pendulum angle limit")
+            return "idle"
+            break
 
-    #     if (abs(sensor_data['cart_pos']-center_position) > 50):
-    #         print("Control failed - exceed cart position limit")
-    #         current_state = "idle"
-    #         break
+        if (abs(sensor_data['cart_pos']-center_position) > cart_position_threshold):
+            print("Control failed - exceed cart position limit")
+            return "idle"
+            break
+    print("Control process done")
     return "idle"
 
 def stop_control(labjack_handle, motor: Motor):
@@ -455,7 +459,8 @@ def main():
 
     cart = Cart()
 
-    current_state = "idle"
+    global current_state
+    current_state = 'idle'
 
     # Main control loop
     try:
