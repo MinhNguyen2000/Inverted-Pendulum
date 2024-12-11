@@ -376,7 +376,6 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
     print("Once the desired starting position is reached, press 's' to start balancing")
 
     start_keyboard_listener()
-    print(f"Current state 1: {current_state}")
     while not user_ready:
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt)
         
@@ -397,20 +396,22 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
 
     user_ready = False  # Reset this flag for future balances
     print("Beginning control process.")
-    print(f"Current state 2: {current_state}")
-    
+
     while current_state == 'balance':
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+        
+        # Active control algorithm goes here
+
         
         # Emergency stop cases
         if (abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold):
             print("Control failed - Exceed pendulum angle limit")
-            return "idle"
+            return 'idle'
             break
 
         if (abs(sensor_data['cart_pos']-center_position) > cart_position_threshold):
             print("Control failed - exceed cart position limit")
-            return "idle"
+            return 'idle'
             break
     print("Control process done")
     return "idle"
