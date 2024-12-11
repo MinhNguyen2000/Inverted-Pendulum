@@ -51,6 +51,7 @@ current_state = "startup"
 # LabJack Initialization and Pin Configuration Functions
 # =============================================================================
 def initialize_labjack():
+    '''Function for connecting to the LabJack T7'''
     handle = ljm.openS("T7", "USB", "ANY")
     print("LabJack T7 connected")
     return handle
@@ -176,6 +177,10 @@ class Motor:
 
         return ctrl_action
 
+class Cart:
+    def __init__(self, position=0, velocity=0):
+        self.pos = position
+        self.vel = velocity
 
 # =============================================================================
 # Low-level Sensor and Actuator Control Functions
@@ -189,9 +194,12 @@ def read_limitswitches(labjack_handle, limitswitch_pins):
         val.append(ljm.eReadName(labjack_handle,pin))
     return val
 
-def read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt):
+def read_and_process_sensors(labjack_handle, pendEncoder:Encoder, motorEncoder:Encoder, cart:Cart, dt):
     """
-    Reads and processes data from pendulum and motor encoders.
+    Reads and processes data from pendulum and motor encoders to update the current states of the system.
+    Expected Behaviour:
+        The angular position and velocity of the pendEncoder and motorEncoder objects are updated
+        Returns a dictionary of the important states (such as encoder position and speed, and cart position and speed)
     
     Parameters:
         handle: LabJack handle for communication.
@@ -206,12 +214,15 @@ def read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt):
     [_, pendEncoder.angular_vel] = pendEncoder.read_encoder(labjack_handle, dt=dt)
     [_, motorEncoder.angular_vel] = motorEncoder.read_encoder(labjack_handle, dt=dt)
     
-    # Process angular positions
+    # Calculate encoder angular positions
     pendEncoder.angular_pos += (pendEncoder.angular_vel * dt / PI) * 180
     motorEncoder.angular_pos += (motorEncoder.angular_vel * dt / PI) * 180
 
-    # Calculate cart position
-    cart_position = motorEncoder.angular_pos / 360 * 0.205
+    # Calculate cart position and speed
+    motorPulley_diameter = 65.3e-3                  # Diameter of the motor pulley
+    motorPulley_circ = PI * motorPulley_diameter    # Circumference of the motor pulley
+    cart.pos = motorEncoder.angular_pos / 360 * motorPulley_circ
+    cart.vel = motorEncoder.angular_vel / 360 * motorPulley_circ
 
     # Return processed data
     return {
@@ -219,7 +230,8 @@ def read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt):
         "pendulum_angular_pos": pendEncoder.angular_pos,
         "motor_angular_vel": motorEncoder.angular_vel,
         "motor_angular_pos": motorEncoder.angular_pos,
-        "cart_position": cart_position,
+        "cart_position": cart.pos,
+        "cart_velocity": cart.vel,
     }
 
 # =============================================================================
@@ -249,9 +261,9 @@ def get_user_input():
 # =============================================================================
 def calibration_process(labjack_handle, 
                         pendEncoder: Encoder, motorEncoder: Encoder, 
-                        motor: Motor, limit_switch_pins):
+                        motor: Motor, cart: Cart, limit_switch_pins):
     """
-    Calibration function to move the cart to the limit switches and center it.
+    Calibration function to move the cart to the limit switch(es) and center it. After this procedure, the current state goes to "idle"
     
     Parameters:
         handle: LabJack handle for communication.
@@ -259,6 +271,9 @@ def calibration_process(labjack_handle,
         motorEncoder: Encoder object for the motor.
         motor: Motor object to control the cart.
         limit_switch_pins: List of digital pins connected to limit switches.
+
+    Return:
+        "idle" as the current state
     """
 
     print("Starting calibration...")
@@ -297,7 +312,7 @@ def calibration_process(labjack_handle,
             break
 
         # # Read and process sensor data for debugging or monitoring
-        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
+        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
         print(f"Cart position: {sensor_data['cart_position']:.2f} m | Switches: {switch_states}")
 
     # Move the cart to the middle position
@@ -305,37 +320,48 @@ def calibration_process(labjack_handle,
     center_position = 1.25/2-0.04
 
     while True:
-        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
+        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
 
         # Stop if the cart is at the center position
         if abs(sensor_data['cart_position'] - center_position) < 0.01:  # Example threshold
             print("Cart centered.")
-            print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
+            motor.send_control_actions(labjack_handle,0)
+            break
+    
+        print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
                         f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
                         f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
                         f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
                         f"Distance (m): {sensor_data['cart_position']:5.2f} | "
+                        f"Velocity (m/s): {sensor_data['cart_velocity']:5.5f}"
                     )
-            motor.send_control_actions(labjack_handle,0)
-            break
-
-        print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
-                f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
-                f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
-                f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
-                f"Distance (m): {sensor_data['cart_position']:5.2f} | "
-            )
-    
     print("Calibration complete.")
 
     return "idle"
 
+def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, limit_switch_pins):
+    print("Starting balancing state from the top position")
+
+    while True:
+
+        pass
+    # Wait for the user to bring the pendulum to approximately 180 deg
+    # Emergency stop cases
+    return 0
+def stop_control(labjack_handle, motor: Motor):
+    # Send zero volt to the motor
+    motor.send_control_actions(labjack_handle, 0)
+    print('Motor control stopped')
+
 def stop_program(labjack_handle, motor: Motor):
     # Send zero volt to the motor
     motor.send_control_actions(labjack_handle, 0)
+    print('Motor control stopped')
 
     time.sleep(2)
     ljm.close(labjack_handle)
+    print('LabJack connection stopped')
+
     exit()
         
     
@@ -364,6 +390,8 @@ def main():
                   motordir_pin=MOTORDIR_PIN)
     motor.intialize_motor(handle)
 
+    cart = Cart()
+
     current_state = "idle"
 
     # Main control loop
@@ -371,23 +399,27 @@ def main():
         while True:
             match current_state:
                 case 'idle':            # if not in the process of anything, ask user for input
+                    stop_control(handle,motor)
                     current_state = get_user_input()
+                    
                 case 'calibration':
                     current_state = calibration_process(labjack_handle=handle, 
                                         pendEncoder=pendEncoder, motorEncoder=motorEncoder,
-                                        motor=motor,
+                                        motor=motor, cart=cart,
                                         limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCH2_PIN])
-                    pass
-                case 'balance':
-                    sensor_data = read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
                     
+                case 'balance':
                     pass
+                    current_state = balance_process(labjack_handle=handle, 
+                                        pendEncoder=pendEncoder, motorEncoder=motorEncoder,
+                                        motor=motor, cart=cart,
+                                        limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCHPIN])
                 case 'swing up':
-                    sensor_data = read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
+                    sensor_data = read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
                     
                     pass
                 case 'state report':
-                    sensor_data = read_and_process_sensors(handle, pendEncoder,motorEncoder,dt=DT)
+                    sensor_data = read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
                     
                     # Display sensor data
                     print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
@@ -395,8 +427,10 @@ def main():
                         f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
                         f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
                         f"Distance (m): {sensor_data['cart_position']:5.2f} | "
+                        f"Velocity (m/s): {sensor_data['cart_velocity']:5.2f}"
                     )
-            
+                    
+                    current_state = "idle"
     except KeyboardInterrupt:
         stop_program(handle,motor)
         pass
