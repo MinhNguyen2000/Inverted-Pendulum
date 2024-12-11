@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import numpy as np
 import keyboard                             # To obtain user input (key presses)
+from pynput import keyboard                 # To obtain user input without needing root access
 
 # Constant definition
 PI = math.pi
@@ -260,6 +261,32 @@ def get_user_input():
         else: 
             print("Invalid input. please enter a number from the list")
 
+import threading
+# Global variables for user input
+user_ready = False
+within_range = False
+lock = threading.Lock()
+
+def on_key_press(key):
+    """
+    Handle key presses to set the system state.
+    """
+    global user_ready
+    try:
+        with lock:
+            if key.char == 's' and within_range:  # 's' starts balancing only when within range
+                user_ready = True
+                print("[INFO] User confirmed start of balancing.")
+    except AttributeError:
+        pass  # Handle special keys like Shift, etc.
+
+def start_keyboard_listener():
+    """
+    Start the keyboard listener in a separate thread.
+    """
+    listener = keyboard.Listener(on_press=on_key_press)
+    listener.start()
+
 # =============================================================================
 # State Functions
 # =============================================================================
@@ -351,6 +378,8 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
     user_ready = False
     within_range = False
 
+    start_keyboard_listener()
+
     while not user_ready:
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt)
         
@@ -367,13 +396,10 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
                 print("Pendulum is outside the acceptable range! Please adjust it back.")
             within_range = False
 
-        # Check for user input to start balancing
-        if within_range and keyboard.is_pressed('s'):  # User presses 's' to start balancing
-            user_ready = True
-
         time.sleep(0.1)  # Allow time for user to respond
 
     print("User confirmed start of balancing. Beginning control process.")
+    
     # while current_state == "balance_process":
     #     sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
         
