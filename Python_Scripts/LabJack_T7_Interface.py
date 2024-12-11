@@ -42,6 +42,10 @@ ROLL_VALUE = 80000                   # Determine the timer frequency for motor P
 
 # Variable definition
 DT = 0.0025                         # Sampling time
+center_position = 1.25/2-0.04       # Center position of the cart
+angle_setup_threshold = 10          # Setup threshold for balancing the pendulum from top position (setup within this range from 180deg)
+angle_balance_threshold = 30        # Threshold for active control
+cart_position_threshold = 0.50      # Threshold for active control. If difference between cart position and desired position outside this range, stop control.
 
 # State definition
 current_state = "startup"
@@ -226,12 +230,12 @@ def read_and_process_sensors(labjack_handle, pendEncoder:Encoder, motorEncoder:E
 
     # Return processed data
     return {
-        "pendulum_angular_vel": pendEncoder.angular_vel,
-        "pendulum_angular_pos": pendEncoder.angular_pos,
-        "motor_angular_vel": motorEncoder.angular_vel,
-        "motor_angular_pos": motorEncoder.angular_pos,
-        "cart_position": cart.pos,
-        "cart_velocity": cart.vel,
+        "P_angular_vel": pendEncoder.angular_vel,
+        "P_angular_pos": pendEncoder.angular_pos,
+        "M_angular_vel": motorEncoder.angular_vel,
+        "M_angular_pos": motorEncoder.angular_pos,
+        "cart_pos": cart.pos,
+        "cart_vel": cart.vel,
     }
 
 # =============================================================================
@@ -294,7 +298,7 @@ def calibration_process(labjack_handle,
 
     #     # # Read and process sensor data for debugging or monitoring
     #     sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, dt=DT)
-    #     print(f"Cart position: {sensor_data['cart_position']:.2f}m | Switches: {switch_states}")
+    #     print(f"Cart position: {sensor_data['cart_pos']:.2f}m | Switches: {switch_states}")
 
     # Move the cart to the second limit switch    
     print("Moving to the second limit switch...")
@@ -313,41 +317,56 @@ def calibration_process(labjack_handle,
 
         # # Read and process sensor data for debugging or monitoring
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
-        print(f"Cart position: {sensor_data['cart_position']:.2f} m | Switches: {switch_states}")
+        print(f"Cart position: {sensor_data['cart_pos']:.2f} m | Switches: {switch_states}")
 
     # Move the cart to the middle position
     motor.send_control_actions(labjack_handle, +1.0)
-    center_position = 1.25/2-0.04
 
     while True:
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
 
         # Stop if the cart is at the center position
-        if abs(sensor_data['cart_position'] - center_position) < 0.01:  # Example threshold
+        if abs(sensor_data['cart_pos'] - center_position) < 0.01:  # Example threshold
             print("Cart centered.")
             motor.send_control_actions(labjack_handle,0)
             break
     
-        print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
-                        f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
-                        f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
-                        f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
-                        f"Distance (m): {sensor_data['cart_position']:5.2f} | "
-                        f"Velocity (m/s): {sensor_data['cart_velocity']:5.5f}"
+        print(f"Vel_p (rad/s): {sensor_data['P_angular_vel']:6.1f} |"
+                        f"Theta_P (deg): {sensor_data['P_angular_pos']:6.1f} |"
+                        f"Vel_M (rad/s): {sensor_data['M_angular_vel']:6.1f} |"
+                        f"Theta_M (deg): {sensor_data['M_angular_pos']:6.1f} |"
+                        f"Distance (m): {sensor_data['cart_pos']:5.2f} | "
+                        f"Velocity (m/s): {sensor_data['cart_vel']:5.5f}"
                     )
     print("Calibration complete.")
 
     return "idle"
 
-def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, limit_switch_pins):
+def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, cart: Cart, limit_switch_pins):
     print("Starting balancing state from the top position")
 
-    while True:
+    print(f"Please move the pendulum to within {angle_setup_threshold} degrees of the top position")
 
-        pass
     # Wait for the user to bring the pendulum to approximately 180 deg
-    # Emergency stop cases
+    sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+    while abs(sensor_data['P_angular_pos'] - 180) > angle_setup_threshold:
+        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+
+    while current_state == "balance_process":
+        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+        
+        # Emergency stop cases
+        # if (abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold):
+        #     print("Control failed - Exceed pendulum angle limit")
+        #     current_state = "idle"
+        #     break
+
+        if (abs(sensor_data['cart_pos']-center_position) > 50):
+            print("Control failed - exceed cart position limit")
+            current_state = "idle"
+            break
     return 0
+
 def stop_control(labjack_handle, motor: Motor):
     # Send zero volt to the motor
     motor.send_control_actions(labjack_handle, 0)
@@ -422,12 +441,12 @@ def main():
                     sensor_data = read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
                     
                     # Display sensor data
-                    print(f"Vel_p (rad/s): {sensor_data['pendulum_angular_vel']:6.1f} |"
-                        f"Theta_P (deg): {sensor_data['pendulum_angular_pos']:6.1f} |"
-                        f"Vel_M (rad/s): {sensor_data['motor_angular_vel']:6.1f} |"
-                        f"Theta_M (deg): {sensor_data['motor_angular_pos']:6.1f} |"
-                        f"Distance (m): {sensor_data['cart_position']:5.2f} | "
-                        f"Velocity (m/s): {sensor_data['cart_velocity']:5.2f}"
+                    print(f"Vel_p (rad/s): {sensor_data['P_angular_vel']:6.1f} |"
+                        f"Theta_P (deg): {sensor_data['P_angular_pos']:6.1f} |"
+                        f"Vel_M (rad/s): {sensor_data['M_angular_vel']:6.1f} |"
+                        f"Theta_M (deg): {sensor_data['M_angular_pos']:6.1f} |"
+                        f"Distance (m): {sensor_data['cart_pos']:5.2f} | "
+                        f"Velocity (m/s): {sensor_data['cart_vel']:5.2f}"
                     )
                     
                     current_state = "idle"
