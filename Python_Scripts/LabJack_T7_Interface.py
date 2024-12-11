@@ -23,6 +23,7 @@ from labjack import ljm                     # LabJack interface
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import numpy as np
+import control
 import keyboard                             # To obtain user input (key presses)
 from pynput import keyboard                 # To obtain user input without needing root access
 
@@ -48,9 +49,28 @@ angle_setup_threshold = 10          # Setup threshold for balancing the pendulum
 angle_balance_threshold = 30        # Threshold for active control
 cart_position_threshold = 0.50      # Threshold for active control. If difference between cart position and desired position outside this range, stop control.
 
-# State definition
+# System control state definition
 current_state = 'idle'
 
+# Physical system parameters
+m = 0.113/3         # Pendulum mass (kg)
+M = 2.465           # Cart mass (kg)
+L = 0.15            # Pendulum length (m)
+g = -9.81           
+d = 0.0001          # Damping coefficient (N*s/m) between cart and rail
+c = 1.27            # Force-Voltage coefficient (N/V) relating the voltage to the motor and the outputted force
+
+# LQR variables
+A = np.array([[0,       1,          0,                  0],
+              [0,       -d/M,       m*g/M,              0],
+              [0,       0,          0,                  1],
+              [0,       -d/(L*M),   -(M+m)*g/(L*M),     0]])
+B = np.array([[0,       1/M,        0,                  1/(L*M)]]).reshape(-1,1)
+Q = np.array([[1,   0,  0,  0],
+              [0,   1,  0,  0],
+              [0,   0,  1,  0],
+              [0,   0,  0,  1]])
+R = np.array([1])
 
 # =============================================================================
 # LabJack Initialization and Pin Configuration Functions
@@ -287,6 +307,40 @@ def start_keyboard_listener():
     listener.start()
 
 # =============================================================================
+# SystemHistory Class for Plotting
+# =============================================================================
+class SystemHistory:
+    def __init__(self):
+        # Initialize a dictionary where keys are the sensor states, and values are lists to hold the historical data.
+        self.history = {
+            'time': [],
+            'pendulum_pos': [],
+            'pendulum_vel': [],
+            'cart_pos': [],
+            'cart_vel': [],
+            'control': [],
+            # You can add more keys as necessary for other sensor states.
+        }
+
+    def append_state(self, pendulum_data: Encoder, cart_data: Cart, control_action, timestamp):
+        # Append the values from the sensor_data to the respective lists in the dictionary
+        self.history['time'].append(timestamp)
+        self.history['pendulum_pos'].append(pendulum_data.angular_pos)
+        self.history['pendulum_vel'].append(pendulum_data.angular_vel)
+        self.history['cart_pos'].append(cart_data.pos)
+        self.history['cart_vel'].append(cart_data.vel)
+        self.history['control'].append(control_action)
+
+    def get_history(self):
+        return self.history
+
+    def reset_history(self):
+        # Clear the history if needed
+        self.history = {key: [] for key in self.history}
+
+system_history = SystemHistory()
+
+# =============================================================================
 # State Functions
 # =============================================================================
 def calibration_process(labjack_handle, 
@@ -338,7 +392,7 @@ def calibration_process(labjack_handle,
         if not(switch_states[0]):  # Limit switch closer to the motor
             print("Second limit switch triggered.")
             motor.send_control_actions(labjack_handle,0)
-            motorEncoder.angular_pos = 0                    # Reset the motor encoder position
+            motorEncoder.angular_pos = 0                            # Reset the motor encoder position
             break
 
         # # Read and process sensor data for debugging or monitoring
@@ -352,23 +406,24 @@ def calibration_process(labjack_handle,
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
 
         # Stop if the cart is at the center position
-        if abs(sensor_data['cart_pos'] - center_position) < 0.01:  # Example threshold
+        if abs(sensor_data['cart_pos'] - center_position) < 0.01:   # Example threshold
             print("Cart centered.")
             motor.send_control_actions(labjack_handle,0)
+            motorEncoder.angular_pos = 0                            # Reset the motor encoder position (middle = 0)
             break
     
-        print(f"Vel_p (rad/s): {sensor_data['P_angular_vel']:6.1f} |"
-                        f"Theta_P (deg): {sensor_data['P_angular_pos']:6.1f} |"
-                        f"Vel_M (rad/s): {sensor_data['M_angular_vel']:6.1f} |"
-                        f"Theta_M (deg): {sensor_data['M_angular_pos']:6.1f} |"
-                        f"Distance (m): {sensor_data['cart_pos']:5.2f} | "
-                        f"Velocity (m/s): {sensor_data['cart_vel']:5.5f}"
-                    )
+        # print(f"Vel_p (rad/s): {sensor_data['P_angular_vel']:6.1f} |"
+        #                 f"Theta_P (deg): {sensor_data['P_angular_pos']:6.1f} |"
+        #                 f"Vel_M (rad/s): {sensor_data['M_angular_vel']:6.1f} |"
+        #                 f"Theta_M (deg): {sensor_data['M_angular_pos']:6.1f} |"
+        #                 f"Distance (m): {sensor_data['cart_pos']:5.2f} | "
+        #                 f"Velocity (m/s): {sensor_data['cart_vel']:5.5f}"
+        #             )
     print("Calibration complete.")
 
     return "idle"
 
-def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, cart: Cart, limit_switch_pins, dt=DT):
+def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, cart: Cart, limit_switch_pins, system_history: SystemHistory, dt=DT):
     global within_range, user_ready
     print("Starting balancing state from the top position")
 
@@ -397,24 +452,45 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
     user_ready = False  # Reset this flag for future balances
     print("Beginning control process.")
 
+    start_time_balance = time.time()
     while current_state == 'balance':
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
         
+        desired_state = np.array([[0, 0, 180, 0]]).reshape(-1,1)
         # Active control algorithm goes here
+        K = control.lqr(A,B,Q,R)
+        u = -K*
 
+
+        # Logging the system state
+        current_time_balance = time.time() - start_time_balance
+        system_history.append_state(pendEncoder,cart,
+                                    control_action=u,
+                                    timestamp=current_time_balance)
         
         # Emergency stop cases
-        if (abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold):
+        if abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold:
             print("Control failed - Exceed pendulum angle limit")
+            current_state = 'idle'
             return 'idle'
-            break
 
-        if (abs(sensor_data['cart_pos']-center_position) > cart_position_threshold):
-            print("Control failed - exceed cart position limit")
+        if abs(sensor_data['cart_pos']) > cart_position_threshold:
+            print("Control failed - Exceed cart position limit")
+            current_state = 'idle'
             return 'idle'
-            break
+        
+        if current_time_balance >= 10:
+            print("Controlled successfully for 10 seconds. You can plot the system history")
+            current_state = 'idle'
+            return 'idle'
+
     print("Control process done")
     return "idle"
+
+# For plotting the history
+def plotting(system_history: SystemHistory):
+    history = system_history.get_history()
+    pass
 
 def stop_control(labjack_handle, motor: Motor):
     # Send zero volt to the motor
