@@ -261,11 +261,9 @@ def get_user_input():
         else: 
             print("Invalid input. please enter a number from the list")
 
-import threading
 # Global variables for user input
 user_ready = False
 within_range = False
-lock = threading.Lock()
 
 def on_key_press(key):
     """
@@ -273,10 +271,9 @@ def on_key_press(key):
     """
     global user_ready
     try:
-        with lock:
-            if key.char == 's' and within_range:  # 's' starts balancing only when within range
-                user_ready = True
-                print("[INFO] User confirmed start of balancing.")
+        if key.char == 's' and within_range:  # 's' starts balancing only when within range
+            user_ready = True
+            print("[INFO] User confirmed start of balancing.")
     except AttributeError:
         pass  # Handle special keys like Shift, etc.
 
@@ -370,13 +367,11 @@ def calibration_process(labjack_handle,
     return "idle"
 
 def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, cart: Cart, limit_switch_pins, dt=DT):
+    global within_range, user_ready
     print("Starting balancing state from the top position")
 
     print(f"Please move the pendulum to within {angle_setup_threshold} degrees of the top position")
     print("Once the desired starting position is reached, press 's' to start balancing")
-
-    user_ready = False
-    within_range = False
 
     start_keyboard_listener()
 
@@ -387,7 +382,7 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
 
         # Check if the pendulum is within the setup threshold
         if is_in_range:
-            if within_range:
+            if not within_range:
                 print("Pendulum is within the acceptable range. Hold it steady.")
                 within_range = True
         else:
@@ -398,7 +393,8 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
 
         time.sleep(0.1)  # Allow time for user to respond
 
-    print("User confirmed start of balancing. Beginning control process.")
+    user_ready = False  # Reset this flag for future balances
+    print("Beginning control process.")
     
     # while current_state == "balance_process":
     #     sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
@@ -418,16 +414,16 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
 def stop_control(labjack_handle, motor: Motor):
     # Send zero volt to the motor
     motor.send_control_actions(labjack_handle, 0)
-    print('Motor control stopped')
+    print('Motor control stopped (Idle Mode)')
 
 def stop_program(labjack_handle, motor: Motor):
     # Send zero volt to the motor
     motor.send_control_actions(labjack_handle, 0)
-    print('Motor control stopped')
+    print('Motor control stopped (Program stopped)')
 
     time.sleep(2)
     ljm.close(labjack_handle)
-    print('LabJack connection stopped')
+    print('LabJack disconnected')
 
     exit()
         
