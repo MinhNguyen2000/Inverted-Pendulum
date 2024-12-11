@@ -351,21 +351,29 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
     sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
     while abs(sensor_data['P_angular_pos'] - 180) > angle_setup_threshold:
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+        current_state = "waiting input"
 
-    while current_state == "balance_process":
-        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+    while current_state == "waiting input":
+        balance_input = input("Is the pendulum at the desired position [Yes/No]: ")
+        yes_list = ['yes', 'y']
+        if balance_input.lower() in yes_list:
+            current_state = "balance process"
+
+    print("Thank you")
+    # while current_state == "balance_process":
+    #     sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
         
-        # Emergency stop cases
-        # if (abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold):
-        #     print("Control failed - Exceed pendulum angle limit")
-        #     current_state = "idle"
-        #     break
+    #     # Emergency stop cases
+    #     # if (abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold):
+    #     #     print("Control failed - Exceed pendulum angle limit")
+    #     #     current_state = "idle"
+    #     #     break
 
-        if (abs(sensor_data['cart_pos']-center_position) > 50):
-            print("Control failed - exceed cart position limit")
-            current_state = "idle"
-            break
-    return 0
+    #     if (abs(sensor_data['cart_pos']-center_position) > 50):
+    #         print("Control failed - exceed cart position limit")
+    #         current_state = "idle"
+    #         break
+    return "idle"
 
 def stop_control(labjack_handle, motor: Motor):
     # Send zero volt to the motor
@@ -432,7 +440,7 @@ def main():
                     current_state = balance_process(labjack_handle=handle, 
                                         pendEncoder=pendEncoder, motorEncoder=motorEncoder,
                                         motor=motor, cart=cart,
-                                        limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCHPIN])
+                                        limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCH2_PIN])
                 case 'swing up':
                     sensor_data = read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
                     
