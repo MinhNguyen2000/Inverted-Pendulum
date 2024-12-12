@@ -435,6 +435,7 @@ def calibration_process(labjack_handle,
     return 'idle'
 
 def zeroing(pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart):
+    global current_ctrl_state
     pendEncoder.angular_pos = 0
     pendEncoder.angular_vel = 0
 
@@ -444,9 +445,11 @@ def zeroing(pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart):
     cart.pos = 0
     cart.vel = 0
 
-    return "System states are reset"
+    current_ctrl_state = 'idle'
+    print("System states are reset")
 
 def centering(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart, motor: Motor, dt = DT):
+    global current_ctrl_state
     read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
     motor.send_control_actions(labjack_handle, - np.sign(cart.pos))
 
@@ -467,6 +470,8 @@ def centering(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, cart:
         #                 f"Distance (m): {sensor_data['cart_pos']:5.2f} | "
         #                 f"Velocity (m/s): {sensor_data['cart_vel']:5.5f}"
         #             )
+
+    current_ctrl_state = 'idle'
     print("Centering process complete.")
 
 def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, cart: Cart, limit_switch_pins, system_history: SystemHistory, dt=DT):
