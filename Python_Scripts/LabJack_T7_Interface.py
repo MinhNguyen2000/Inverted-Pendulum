@@ -43,7 +43,7 @@ LIMIT_SWITCH2_PIN   =   "DIO7"      # The limit switch further from the motor
 ROLL_VALUE = 80000                   # Determine the timer frequency for motor PWM (speed) control
 
 # Variable definition
-DT = 0.0025                         # Sampling time
+DT = 0.0005                         # Sampling time
 center_position = 1.25/2-0.04       # Center position of the cart
 angle_setup_threshold = 10          # Setup threshold for balancing the pendulum from top position (setup within this range from 180deg)
 angle_balance_threshold = 30        # Threshold for active control
@@ -58,7 +58,7 @@ M = 2.465           # Cart mass (kg)
 L = 0.15            # Pendulum length (m)
 g = -9.81           
 d = 0.0001          # Damping coefficient (N*s/m) between cart and rail
-c = 1270/10            # Force-Voltage coefficient (N/V) relating the voltage to the motor and the outputted force
+c = 75            # Force-Voltage coefficient (N/V) relating the voltage to the motor and the outputted force
 
 # Linearized system model (Jacobian of the motion model at theta = pi, theta_dot = 0)
 A = np.array([[0,       1,          0,                  0],
@@ -447,6 +447,7 @@ def zeroing(pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart):
 
     current_ctrl_state = 'idle'
     print("System states are reset")
+    return
 
 def centering(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart, motor: Motor, dt = DT):
     global current_ctrl_state
@@ -613,9 +614,10 @@ def main():
                                         limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCH2_PIN])
                     print(f"Current mode: {current_ctrl_state}")
                 case 'centering':
+                    centering(handle, pendEncoder, motorEncoder, cart, motor)
                     pass
                 case 'zeroing':
-
+                    zeroing(pendEncoder, motorEncoder,cart)
                     pass
                 case 'balance':
                     print(f"Control state 0: {current_ctrl_state}")
