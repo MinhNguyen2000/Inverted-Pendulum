@@ -50,7 +50,7 @@ angle_balance_threshold = 30        # Threshold for active control
 cart_position_threshold = 0.50      # Threshold for active control. If difference between cart position and desired position outside this range, stop control.
 
 # System control state definition
-current_state = 'idle'
+current_ctrl_state = 'idle'
 
 # Physical system parameters
 m = 0.113/3         # Pendulum mass (kg)
@@ -60,17 +60,25 @@ g = -9.81
 d = 0.0001          # Damping coefficient (N*s/m) between cart and rail
 c = 1.27            # Force-Voltage coefficient (N/V) relating the voltage to the motor and the outputted force
 
-# LQR variables
+# Linearized system model (Jacobian of the motion model at theta = pi, theta_dot = 0)
 A = np.array([[0,       1,          0,                  0],
               [0,       -d/M,       m*g/M,              0],
               [0,       0,          0,                  1],
               [0,       -d/(L*M),   -(M+m)*g/(L*M),     0]])
 B = np.array([[0,       1/M,        0,                  1/(L*M)]]).reshape(-1,1)
-Q = np.array([[1,   0,  0,  0],
-              [0,   1,  0,  0],
-              [0,   0,  1,  0],
-              [0,   0,  0,  1]])
+
+# Assume full-state feedback
+C = np.eye(4)
+D = np.zeros(4).reshape(-1,1)
+
+sys_ss_cont = control.ss(A, B, C, D)
+sys_ss_disc = control.c2d(sys_ss_cont) 
+
+Ad = sys_ss_disc
+Bd = sys_ss_disc
+Q = np.eye(A.shape[1])
 R = np.array([1])
+K = control.dlqr(Ad,Bd,Q,R)
 
 # =============================================================================
 # LabJack Initialization and Pin Configuration Functions
@@ -289,13 +297,13 @@ def on_key_press(key):
     """
     Handle key presses to set the system state.
     """
-    global user_ready, current_state
+    global user_ready, current_ctrl_state
     try:
         if key.char == 's' and within_range:  # 's' starts balancing only when within range
             user_ready = True
             print("[INFO] User confirmed start of balancing.")
         if key.char == 'q':
-            current_state = 'idle'
+            current_ctrl_state = 'idle'
     except AttributeError:
         pass  # Handle special keys like Shift, etc.
 
@@ -431,6 +439,7 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
     print("Once the desired starting position is reached, press 's' to start balancing")
 
     start_keyboard_listener()
+    # Waiting for the user to manually bring the pendulum up and press 's'
     while not user_ready:
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt)
         
@@ -453,35 +462,41 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
     print("Beginning control process.")
 
     start_time_balance = time.time()
-    while current_state == 'balance':
+    while current_ctrl_state == 'balance':
         sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
         
+        current_state = np.array([[cart.pos, cart.vel, pendEncoder.angular_pos, pendEncoder.angular_vel]])
         desired_state = np.array([[0, 0, 180, 0]]).reshape(-1,1)
         # Active control algorithm goes here
-        K = control.lqr(A,B,Q,R)
-        u = -K*
-
+        
+        # Control output (force)
+        u_F = -K*(current_state-desired_state)
+        # Control output (voltage to the motor)
+        u_V = u_F/c
 
         # Logging the system state
         current_time_balance = time.time() - start_time_balance
-        system_history.append_state(pendEncoder,cart,
-                                    control_action=u,
-                                    timestamp=current_time_balance)
+        # system_history.append_state(pendEncoder,cart,
+        #                             control_action=u,
+        #                             timestamp=current_time_balance)
+        
+        # Print the control ouput 
+        print(u_V)
         
         # Emergency stop cases
         if abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold:
             print("Control failed - Exceed pendulum angle limit")
-            current_state = 'idle'
+            current_ctrl_state = 'idle'
             return 'idle'
 
         if abs(sensor_data['cart_pos']) > cart_position_threshold:
             print("Control failed - Exceed cart position limit")
-            current_state = 'idle'
+            current_ctrl_state = 'idle'
             return 'idle'
         
         if current_time_balance >= 10:
             print("Controlled successfully for 10 seconds. You can plot the system history")
-            current_state = 'idle'
+            current_ctrl_state = 'idle'
             return 'idle'
 
     print("Control process done")
@@ -536,26 +551,26 @@ def main():
 
     cart = Cart()
 
-    global current_state
-    current_state = 'idle'
+    global current_ctrl_state
+    current_ctrl_state = 'idle'
 
     # Main control loop
     try:
         while True:
-            match current_state:
+            match current_ctrl_state:
                 case 'idle':            # if not in the process of anything, ask user for input
                     stop_control(handle,motor)
-                    current_state = get_user_input()
+                    current_ctrl_state = get_user_input()
                     
                 case 'calibration':
-                    current_state = calibration_process(labjack_handle=handle, 
+                    current_ctrl_state = calibration_process(labjack_handle=handle, 
                                         pendEncoder=pendEncoder, motorEncoder=motorEncoder,
                                         motor=motor, cart=cart,
                                         limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCH2_PIN])
                     
                 case 'balance':
                     pass
-                    current_state = balance_process(labjack_handle=handle, 
+                    current_ctrl_state = balance_process(labjack_handle=handle, 
                                         pendEncoder=pendEncoder, motorEncoder=motorEncoder,
                                         motor=motor, cart=cart,
                                         limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCH2_PIN])
@@ -575,7 +590,7 @@ def main():
                         f"Velocity (m/s): {sensor_data['cart_vel']:5.2f}"
                     )
                     
-                    current_state = "idle"
+                    current_ctrl_state = "idle"
     except KeyboardInterrupt:
         stop_program(handle,motor)
         pass
