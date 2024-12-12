@@ -193,7 +193,7 @@ class Motor:
         '''
 
         # Limit control action
-        ctrl_limit = 3.5
+        ctrl_limit = 4.0
         ctrl_action = max(min(ctrl_action, ctrl_limit), -ctrl_limit)
 
         # Determine the required duty cycle of the PWM signal
@@ -274,8 +274,10 @@ def read_and_process_sensors(labjack_handle, pendEncoder:Encoder, motorEncoder:E
 def get_user_input():
     inputs = {
         "1": "calibration",
-        "2": "balance",
-        "3": "swing up",
+        "2": "centering",
+        "3": "zeroing",
+        "4": "balance",
+        "5": "swing up",
         "9": "state report"
     }
 
@@ -432,6 +434,41 @@ def calibration_process(labjack_handle,
 
     return 'idle'
 
+def zeroing(pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart):
+    pendEncoder.angular_pos = 0
+    pendEncoder.angular_vel = 0
+
+    motorEncoder.angular_pos = 0
+    motorEncoder.angular_vel = 0
+
+    cart.pos = 0
+    cart.vel = 0
+
+    return "System states are reset"
+
+def centering(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart, motor: Motor, dt = DT):
+    read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+    motor.send_control_actions(labjack_handle, - np.sign(cart.pos))
+
+    while True:
+        read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+
+        # Stop if the cart is at the center position
+        if abs(cart.pos) < 0.01:   # Example threshold
+            print("Cart centered.")
+            motor.send_control_actions(labjack_handle,0)
+            motorEncoder.angular_pos = 0                            # Reset the motor encoder position (middle = 0)
+            break
+    
+        # print(f"Vel_p (rad/s): {sensor_data['P_angular_vel']:6.1f} |"
+        #                 f"Theta_P (deg): {sensor_data['P_angular_pos']:6.1f} |"
+        #                 f"Vel_M (rad/s): {sensor_data['M_angular_vel']:6.1f} |"
+        #                 f"Theta_M (deg): {sensor_data['M_angular_pos']:6.1f} |"
+        #                 f"Distance (m): {sensor_data['cart_pos']:5.2f} | "
+        #                 f"Velocity (m/s): {sensor_data['cart_vel']:5.5f}"
+        #             )
+    print("Centering process complete.")
+
 def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, motor: Motor, cart: Cart, limit_switch_pins, system_history: SystemHistory, dt=DT):
     global within_range, user_ready
     print("Starting balancing state from the top position")
@@ -570,7 +607,11 @@ def main():
                                         motor=motor, cart=cart,
                                         limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCH2_PIN])
                     print(f"Current mode: {current_ctrl_state}")
-                    
+                case 'centering':
+                    pass
+                case 'zeroing':
+
+                    pass
                 case 'balance':
                     print(f"Control state 0: {current_ctrl_state}")
                     current_ctrl_state = balance_process(labjack_handle=handle, 
