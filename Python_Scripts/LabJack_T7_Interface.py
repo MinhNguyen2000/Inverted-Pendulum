@@ -92,11 +92,16 @@ def initialize_labjack():
 class Encoder:
     def __init__(self, name, resolution, encoder_pin, encoder_pinb, angular_pos = 0, angular_vel = 0):
         self.name = name
-        self.res = resolution               # (pulse per revolution - PPR)
-        self.encoder_pin = encoder_pin              # the quadrature encoder read pin
+        self.res = resolution                           # (pulse per revolution - PPR)
+        self.encoder_pin = encoder_pin                  # the quadrature encoder read pin
         self.encoder_pinb = encoder_pinb
-        self.angular_pos = angular_pos      # angular position (rad) - initialized as 0
-        self.angular_vel = angular_vel      # angular velovity (rad/s) - initialized as 0
+
+        self.angular_pos_prev = 0
+        self.angular_pos = angular_pos                  # angular position (rad) - initialized as 0
+        self.angular_pos_deg = self.angular_pos / PI * 180  # angular position (deg)
+        self.angular_vel = angular_vel                  # angular velovity (rad/s) - initialized as 0
+        self.angular_vel_rpm = self.angular_vel / (2 * PI) * 60
+        
 
     def initialize_encoder(self, labjack_handle):
         '''Function to configure the pins of the LabJack T7 to enable quadrature encoder reading
@@ -142,6 +147,17 @@ class Encoder:
 
         # return [speed_rpm, speed_rps]
         return speed_rpm, speed_rps
+    
+    def update_state(self, labjack_handle, dt):
+        # Read quadrature encoder value
+        val = ljm.eReadName(labjack_handle, self.encoder_pin + "_EF_READ_A_F")              # Reading the encoder pulses
+        
+        self.angular_pos_prev = self.angular_pos
+        self.angular_pos = (val/4) / self.res * (2 * PI)                                    # Current position (rad)
+        self.angular_pos_deg = self.angular_pos / PI * 180                                  # Current position (degree)
+        self.angular_vel = (self.angular_pos - self.angular_pos_prev) / dt                  # Velocity (rad/s)
+        self.angular_vel_rpm = self.angular_vel / (2 * PI) * 60                             # Velocity (rpm)
+
 
 class Motor:
     def __init__(self, motorpwm_pin, motordir_pin):
@@ -243,19 +259,23 @@ def read_and_process_sensors(labjack_handle, pendEncoder:Encoder, motorEncoder:E
     Returns:
         dict: Processed sensor data including angular velocities, positions, and cart position.
     """
-    # Read encoder data
-    [_, pendEncoder.angular_vel] = pendEncoder.read_encoder(labjack_handle, dt=dt)
-    [_, motorEncoder.angular_vel] = motorEncoder.read_encoder(labjack_handle, dt=dt)
+    # # Old method with read_encoder
+    # # Read encoder data
+    # [_, pendEncoder.angular_vel] = pendEncoder.read_encoder(labjack_handle, dt=dt)
+    # [_, motorEncoder.angular_vel] = motorEncoder.read_encoder(labjack_handle, dt=dt)
     
-    # Calculate encoder angular positions
-    pendEncoder.angular_pos += (pendEncoder.angular_vel * dt / PI) * 180
-    motorEncoder.angular_pos += (motorEncoder.angular_vel * dt / PI) * 180
+    # # Calculate encoder angular positions
+    # pendEncoder.angular_pos += (pendEncoder.angular_vel * dt / PI) * 180
+    # motorEncoder.angular_pos += (motorEncoder.angular_vel * dt / PI) * 180
+
+    pendEncoder.update_state(labjack_handle)
+    motorEncoder.update_state(labjack_handle)
 
     # Calculate cart position and speed
-    motorPulley_diameter = 65.3e-3                  # Diameter of the motor pulley
-    motorPulley_circ = PI * motorPulley_diameter    # Circumference of the motor pulley
-    cart.pos = motorEncoder.angular_pos / 360 * motorPulley_circ
-    cart.vel = motorEncoder.angular_vel / 360 * motorPulley_circ
+    motorPulley_diameter = 65.3e-3                                  # Diameter of the motor pulley (m)
+    motorPulley_circ = PI * motorPulley_diameter                    # Circumference of the motor pulley (m)
+    cart.pos = motorEncoder.angular_pos / (2 * PI) * motorPulley_circ
+    cart.vel = motorEncoder.angular_vel / (2 * PI) * motorPulley_circ   # rad/s * (pulley_circumference (m) / 2pi rads)
 
     # Return processed data
     return {
@@ -305,16 +325,10 @@ def on_key_press(key):
             user_ready = True
             print("[INFO] User confirmed start of balancing.")
         if key.char == 'q':
+            print('[INFO] User-specified quit to idle mode')
             current_ctrl_state = 'idle'
     except AttributeError:
         pass  # Handle special keys like Shift, etc.
-
-def start_keyboard_listener():
-    """
-    Start the keyboard listener in a separate thread.
-    """
-    listener = keyboard.Listener(on_press=on_key_press)
-    listener.start()
 
 # =============================================================================
 # SystemHistory Class for Plotting
@@ -407,17 +421,17 @@ def calibration_process(labjack_handle,
             break
 
         # # Read and process sensor data for debugging or monitoring
-        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
-        print(f"Cart position: {sensor_data['cart_pos']:.2f} m | Switches: {switch_states}")
+        read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+        print(f"Cart position: {cart.pos:.2f} m | Switches: {switch_states}")
 
     # Move the cart to the middle position
     motor.send_control_actions(labjack_handle, +1.0)
 
     while True:
-        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+        read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
 
         # Stop if the cart is at the center position
-        if abs(sensor_data['cart_pos'] - center_position) < 0.01:   # Example threshold
+        if abs(cart.pos - center_position) < 0.01:   # Example threshold
             print("Cart centered.")
             motor.send_control_actions(labjack_handle,0)
             motorEncoder.angular_pos = 0                            # Reset the motor encoder position (middle = 0)
@@ -434,8 +448,9 @@ def calibration_process(labjack_handle,
 
     return 'idle'
 
-def zeroing(pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart):
+def zeroing(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart):
     global current_ctrl_state
+    read_and_process_sensors(labjack_handle,pendEncoder,motorEncoder,cart)
     pendEncoder.angular_pos = 0
     pendEncoder.angular_vel = 0
 
@@ -485,10 +500,10 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
     listener.start()
 
     # Waiting for the user to manually bring the pendulum up and press 's'
-    while not user_ready:
-        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt)
+    while not user_ready and current_ctrl_state == 'balance':
+        read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt)
         
-        is_in_range = abs(abs(sensor_data['P_angular_pos']) - 180) <= angle_setup_threshold
+        is_in_range = abs(abs(pendEncoder.angular_pos_deg) - 180) <= angle_setup_threshold
 
         # Check if the pendulum is within the setup threshold
         if is_in_range:
@@ -503,13 +518,14 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
 
         time.sleep(0.1)  # Allow time for user to respond
     listener.stop()
+
     user_ready = False  # Reset this flag for future balances
     print("Beginning control process.")
     start_time_balance = time.time()
     while current_ctrl_state == 'balance':
-        sensor_data = read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
+        read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
         
-        current_state = np.array([[cart.pos, cart.vel, pendEncoder.angular_pos, pendEncoder.angular_vel]]).reshape(-1,1)
+        current_state = np.array([[cart.pos, cart.vel, pendEncoder.angular_pos_deg, pendEncoder.angular_vel]]).reshape(-1,1)
         desired_state = np.array([[0, 0, 180, 0]]).reshape(-1,1)
         # Active control algorithm goes here
         
@@ -525,16 +541,21 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
         #                             timestamp=current_time_balance)
         
         # Print the control ouput 
-        print(f"Sending {u_V}V to the motor")
-        motor.send_control_actions(labjack_handle,u_V)
-        
+        u_V = motor.send_control_actions(labjack_handle,u_V)
+        print(f"Sent {u_V}V to the motor |"
+              f"Distance (m): {cart.pos:6.2f} | "
+              f"Velocity (m/s): {cart.vel:6.5f}"
+              f"Vel_p (rad/s): {pendEncoder.angular_vel:6.2f} |"
+              f"Theta_P (deg): {pendEncoder.angular_pos_deg:6.2f} |"
+              )
+
         # Emergency stop cases
-        if abs(sensor_data['P_angular_pos'] - 180) > angle_balance_threshold:
+        if abs(pendEncoder.angular_pos_deg - 180) > angle_balance_threshold:
             print("Control failed - Exceed pendulum angle limit")
             # current_ctrl_state = 'idle'
             return 'idle'
 
-        if abs(sensor_data['cart_pos']) > cart_position_threshold:
+        if abs(cart.pos) > cart_position_threshold:
             print("Control failed - Exceed cart position limit")
             # current_ctrl_state = 'idle'
             return 'idle'
@@ -628,20 +649,25 @@ def main():
                                         system_history = system_history)
                     # current_ctrl_state = state
                 case 'swing up':
-                    sensor_data = read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
+                    read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
                     
                     pass
                 case 'state report':
-                    sensor_data = read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
-                    
+                    read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
+                    listener = keyboard.Listener(on_press=on_key_press)
+                    listener.start()
+
                     # Display sensor data
-                    print(f"Vel_p (rad/s): {sensor_data['P_angular_vel']:6.1f} |"
-                        f"Theta_P (deg): {sensor_data['P_angular_pos']:6.1f} |"
-                        f"Vel_M (rad/s): {sensor_data['M_angular_vel']:6.1f} |"
-                        f"Theta_M (deg): {sensor_data['M_angular_pos']:6.1f} |"
-                        f"Distance (m): {sensor_data['cart_pos']:5.2f} | "
-                        f"Velocity (m/s): {sensor_data['cart_vel']:5.2f}"
-                    )
+                    while current_ctrl_state == 'state report':
+                        print(f"Vel_p (rad/s): {pendEncoder.angular_vel:6.1f} |"
+                            f"Theta_P (deg): {pendEncoder.angular_pos_deg:6.1f} |"
+                            f"Vel_M (rad/s): {motorEncoder.angular_vel:6.1f} |"
+                            f"Theta_M (deg): {motorEncoder.angular_pos_deg:6.1f} |"
+                            f"Distance (m): {cart.pos:5.2f} | "
+                            f"Velocity (m/s): {cart.vel:5.2f}"
+                        )
+                        
+                    listener.stop()
                     
                     current_ctrl_state = "idle"
     except KeyboardInterrupt:
