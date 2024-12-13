@@ -77,6 +77,8 @@ sys_ss_disc = control.c2d(sys_ss_cont,DT)
 Ad = sys_ss_disc.A
 Bd = sys_ss_disc.B
 Q = np.eye(A.shape[1])
+Q[0,0] = 100
+Q[2,2] = 50
 R = np.array([1])
 K,_,_ = control.dlqr(Ad,Bd,Q,R)
 
@@ -147,8 +149,11 @@ class Encoder:
 
         # return [speed_rpm, speed_rps]
         return speed_rpm, speed_rps
+
+    def reset_encoder(self, labjack_handle):
+        ljm.eReadName(labjack_handle, self.encoder_pin + "_EF_READ_A_F_AND_RESET")              # Reset the encoder values
     
-    def update_state(self, labjack_handle, dt):
+    def update_state(self, labjack_handle, dt=DT):
         # Read quadrature encoder value
         val = ljm.eReadName(labjack_handle, self.encoder_pin + "_EF_READ_A_F")              # Reading the encoder pulses
         
@@ -200,7 +205,7 @@ class Motor:
         print(f'Motor was initialized in {time.time() - start_time}s')
         return motor
     
-    def send_control_actions(self, labjack_handle, ctrl_action):
+    def send_control_actions(self, labjack_handle, ctrl_action :float):
         '''Function to actuate the motor
         
         Parameters:
@@ -209,21 +214,22 @@ class Motor:
         '''
 
         # Limit control action
-        ctrl_limit = 4.0
+        ctrl_limit = 3.5
         ctrl_action = max(min(ctrl_action, ctrl_limit), -ctrl_limit)
 
         # Determine the required duty cycle of the PWM signal
         pwm_duty_cycle = abs(ctrl_action) / (4.5 - 0)
-
-        # Set direction pin based on control action
-        if ctrl_action > 0:
-            ljm.eWriteName(labjack_handle,self.motordir_pin,0)
-        elif ctrl_action <= 0:
-            ljm.eWriteName(labjack_handle,self.motordir_pin,1)
-        
-        # Send control action to velocity control pin
-        ljm.eWriteName(labjack_handle, self.motorpwm_pin + "_EF_CONFIG_A", pwm_duty_cycle*ROLL_VALUE)
-
+        try:
+            # Set direction pin based on control action
+            if ctrl_action > 0:
+                ljm.eWriteName(labjack_handle,self.motordir_pin,0)
+            elif ctrl_action <= 0:
+                ljm.eWriteName(labjack_handle,self.motordir_pin,1)
+            
+            # Send control action to velocity control pin
+            ljm.eWriteName(labjack_handle, self.motorpwm_pin + "_EF_CONFIG_A", pwm_duty_cycle*ROLL_VALUE)
+        except:
+            print("Error")
         return ctrl_action
 
 class Cart:
@@ -243,7 +249,7 @@ def read_limitswitches(labjack_handle, limitswitch_pins):
         val.append(ljm.eReadName(labjack_handle,pin))
     return val
 
-def read_and_process_sensors(labjack_handle, pendEncoder:Encoder, motorEncoder:Encoder, cart:Cart, dt):
+def read_and_process_sensors(labjack_handle, pendEncoder:Encoder, motorEncoder:Encoder, cart:Cart, dt=DT):
     """
     Reads and processes data from pendulum and motor encoders to update the current states of the system.
     Expected Behaviour:
@@ -385,7 +391,6 @@ def calibration_process(labjack_handle,
     """
 
     print("Starting calibration...")
-    print(f"Control state 1: {current_ctrl_state}")
 
     # # Move the cart to the first limit switch
     # print("Moving to the first limit switch...")
@@ -418,6 +423,9 @@ def calibration_process(labjack_handle,
             print("Second limit switch triggered.")
             motor.send_control_actions(labjack_handle,0)
             motorEncoder.angular_pos = 0                            # Reset the motor encoder position
+            motorEncoder.angular_pos_deg = 0
+            motorEncoder.reset_encoder(labjack_handle)
+            cart.pos = 0
             break
 
         # # Read and process sensor data for debugging or monitoring
@@ -429,12 +437,13 @@ def calibration_process(labjack_handle,
 
     while True:
         read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
-
+        print(f"Cart position: {cart.pos:.2f} m")
         # Stop if the cart is at the center position
         if abs(cart.pos - center_position) < 0.01:   # Example threshold
             print("Cart centered.")
             motor.send_control_actions(labjack_handle,0)
             motorEncoder.angular_pos = 0                            # Reset the motor encoder position (middle = 0)
+            motorEncoder.reset_encoder(labjack_handle)
             break
     
         # print(f"Vel_p (rad/s): {sensor_data['P_angular_vel']:6.1f} |"
@@ -451,17 +460,25 @@ def calibration_process(labjack_handle,
 def zeroing(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart):
     global current_ctrl_state
     read_and_process_sensors(labjack_handle,pendEncoder,motorEncoder,cart)
+    pendEncoder.angular_pos_prev = 0
     pendEncoder.angular_pos = 0
+    pendEncoder.angular_pos_deg = 0
     pendEncoder.angular_vel = 0
+    pendEncoder.angular_vel_rpm = 0
+    pendEncoder.reset_encoder(labjack_handle)
 
+    motorEncoder.angular_pos_prev = 0
     motorEncoder.angular_pos = 0
+    motorEncoder.angular_pos_deg = 0
     motorEncoder.angular_vel = 0
+    motorEncoder.angular_vel_rpm = 0
+    motorEncoder.reset_encoder(labjack_handle)
 
     cart.pos = 0
     cart.vel = 0
 
     current_ctrl_state = 'idle'
-    print("System states are reset")
+    print("\nSystem states are reset")
     return
 
 def centering(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder, cart: Cart, motor: Motor, dt = DT):
@@ -501,7 +518,7 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
 
     # Waiting for the user to manually bring the pendulum up and press 's'
     while not user_ready and current_ctrl_state == 'balance':
-        read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt)
+        read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart)
         
         is_in_range = abs(abs(pendEncoder.angular_pos_deg) - 180) <= angle_setup_threshold
 
@@ -533,7 +550,7 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
         u_F = -K @ (current_state-desired_state)
         # Control output (voltage to the motor)
         u_V = u_F/c
-
+        u_V = float(u_V)
         # Logging the system state
         current_time_balance = time.time() - start_time_balance
         # system_history.append_state(pendEncoder,cart,
@@ -541,11 +558,11 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
         #                             timestamp=current_time_balance)
         
         # Print the control ouput 
-        u_V = motor.send_control_actions(labjack_handle,u_V)
-        print(f"Sent {u_V}V to the motor |"
-              f"Distance (m): {cart.pos:6.2f} | "
-              f"Velocity (m/s): {cart.vel:6.5f}"
-              f"Vel_p (rad/s): {pendEncoder.angular_vel:6.2f} |"
+        u_V_out = motor.send_control_actions(labjack_handle,u_V)
+        print(f"Sent {u_V_out:6.3f}V to the motor | "
+              f"Pos_c (m): {cart.pos:6.3f} | "
+              f"Vel_c (m/s): {cart.vel:6.3f} | "
+              f"Vel_p (rad/s): {pendEncoder.angular_vel:6.2f} | "
               f"Theta_P (deg): {pendEncoder.angular_pos_deg:6.2f} |"
               )
 
@@ -629,16 +646,18 @@ def main():
                     current_ctrl_state = get_user_input()
                     
                 case 'calibration':
+                    listener = keyboard.Listener(on_press=on_key_press)
+                    listener.start()
                     current_ctrl_state = calibration_process(labjack_handle=handle, 
                                         pendEncoder=pendEncoder, motorEncoder=motorEncoder,
                                         motor=motor, cart=cart,
                                         limit_switch_pins=[LIMIT_SWITCH1_PIN,LIMIT_SWITCH2_PIN])
-                    print(f"Current mode: {current_ctrl_state}")
+                    listener.stop()
                 case 'centering':
                     centering(handle, pendEncoder, motorEncoder, cart, motor)
                     pass
                 case 'zeroing':
-                    zeroing(pendEncoder, motorEncoder,cart)
+                    zeroing(handle, pendEncoder, motorEncoder,cart)
                     pass
                 case 'balance':
                     print(f"Control state 0: {current_ctrl_state}")
@@ -653,12 +672,12 @@ def main():
                     
                     pass
                 case 'state report':
-                    read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
                     listener = keyboard.Listener(on_press=on_key_press)
                     listener.start()
 
                     # Display sensor data
                     while current_ctrl_state == 'state report':
+                        read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
                         print(f"Vel_p (rad/s): {pendEncoder.angular_vel:6.1f} |"
                             f"Theta_P (deg): {pendEncoder.angular_pos_deg:6.1f} |"
                             f"Vel_M (rad/s): {motorEncoder.angular_vel:6.1f} |"
