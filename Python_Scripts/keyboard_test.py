@@ -27,6 +27,9 @@ def main():
     start_keyboard_listener()
     while True:
         print(user_ready)
+        if user_ready:
+            print(user_ready)
+            break
 
 if __name__ == "__main__":
     main()

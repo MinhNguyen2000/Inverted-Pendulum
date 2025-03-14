@@ -43,7 +43,7 @@ LIMIT_SWITCH2_PIN   =   "DIO7"      # The limit switch further from the motor
 ROLL_VALUE = 80000                   # Determine the timer frequency for motor PWM (speed) control
 
 # Variable definition
-DT = 0.0005                         # Sampling time
+DT = 0.001                          # Sampling time
 center_position = 1.25/2-0.04       # Center position of the cart
 angle_setup_threshold = 10          # Setup threshold for balancing the pendulum from top position (setup within this range from 180deg)
 angle_balance_threshold = 30        # Threshold for active control
@@ -77,7 +77,7 @@ sys_ss_disc = control.c2d(sys_ss_cont,DT)
 Ad = sys_ss_disc.A
 Bd = sys_ss_disc.B
 Q = np.eye(A.shape[1])
-Q[0,0] = 100
+Q[0,0] = 10000
 Q[2,2] = 50
 R = np.array([1])
 K,_,_ = control.dlqr(Ad,Bd,Q,R)
@@ -162,7 +162,6 @@ class Encoder:
         self.angular_pos_deg = self.angular_pos / PI * 180                                  # Current position (degree)
         self.angular_vel = (self.angular_pos - self.angular_pos_prev) / dt                  # Velocity (rad/s)
         self.angular_vel_rpm = self.angular_vel / (2 * PI) * 60                             # Velocity (rpm)
-
 
 class Motor:
     def __init__(self, motorpwm_pin, motordir_pin):
@@ -389,7 +388,9 @@ def calibration_process(labjack_handle,
     Return:
         "idle" as the current state
     """
-
+    
+    listener = keyboard.Listener(on_press=on_key_press)
+    listener.start() 
     print("Starting calibration...")
 
     # # Move the cart to the first limit switch
@@ -411,16 +412,16 @@ def calibration_process(labjack_handle,
     #     print(f"Cart position: {sensor_data['cart_pos']:.2f}m | Switches: {switch_states}")
 
     # Move the cart to the second limit switch    
-    print("Moving to the second limit switch...")
+    print("Moving toward the limit switch...")
     motor.send_control_actions(labjack_handle, -1.0)
     
-    while True:
+    while current_ctrl_state == 'calibration':
         # Read limit switch states
         switch_states = read_limitswitches(labjack_handle, limit_switch_pins)
 
         # Exit loop if the first limit switch is pressed (value = 0.0)
         if not(switch_states[0]):  # Limit switch closer to the motor
-            print("Second limit switch triggered.")
+            print("Limit switch triggered.")
             motor.send_control_actions(labjack_handle,0)
             motorEncoder.angular_pos = 0                            # Reset the motor encoder position
             motorEncoder.angular_pos_deg = 0
@@ -430,14 +431,14 @@ def calibration_process(labjack_handle,
 
         # # Read and process sensor data for debugging or monitoring
         read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
-        print(f"Cart position: {cart.pos:.2f} m | Switches: {switch_states}")
+        print(f"Cart position: {cart.pos:.2f} m | Switches: {switch_states}",end = ' \r')
 
     # Move the cart to the middle position
     motor.send_control_actions(labjack_handle, +1.0)
 
-    while True:
+    while current_ctrl_state == 'calibration':
         read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
-        print(f"Cart position: {cart.pos:.2f} m")
+        print(f"Cart position: {cart.pos:.2f} m", end = ' \r')
         # Stop if the cart is at the center position
         if abs(cart.pos - center_position) < 0.01:   # Example threshold
             print("Cart centered.")
@@ -454,6 +455,8 @@ def calibration_process(labjack_handle,
         #                 f"Velocity (m/s): {sensor_data['cart_vel']:5.5f}"
         #             )
     print("Calibration complete.")
+
+    listener.stop()
 
     return 'idle'
 
@@ -514,7 +517,7 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
     print(f"Please move the pendulum to within {angle_setup_threshold} degrees of the top position")
     print("Once the desired starting position is reached, press 's' to start balancing")
     listener = keyboard.Listener(on_press=on_key_press)
-    listener.start()
+    listener.start()        # Start the listener to listen to key press ('s' to start or 'q' to quit)
 
     # Waiting for the user to manually bring the pendulum up and press 's'
     while not user_ready and current_ctrl_state == 'balance':
@@ -524,11 +527,11 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
 
         # Check if the pendulum is within the setup threshold
         if is_in_range:
-            if not within_range:
+            if not within_range:    # If the pendulum was brought into range but not was not previously within range
                 print("Pendulum is within the acceptable range. Hold it steady.")
                 within_range = True
         else:
-            if within_range:
+            if within_range:        # if tthe pendulum was brought outside of range but was previously within range
                 # Notify the user when the pendulum drops outside the acceptable range
                 print("Pendulum is outside the acceptable range! Please adjust it back.")
             within_range = False
@@ -563,7 +566,7 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
               f"Pos_c (m): {cart.pos:6.3f} | "
               f"Vel_c (m/s): {cart.vel:6.3f} | "
               f"Vel_p (rad/s): {pendEncoder.angular_vel:6.2f} | "
-              f"Theta_P (deg): {pendEncoder.angular_pos_deg:6.2f} |"
+              f"Theta_P (deg): {pendEncoder.angular_pos_deg:6.2f} |", end = ' \r'
               )
 
         # Emergency stop cases
@@ -577,7 +580,7 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
             # current_ctrl_state = 'idle'
             return 'idle'
         
-        if current_time_balance >= 10:
+        if current_time_balance >= 60:
             print("Controlled successfully for 10 seconds. You can plot the system history")
             # current_ctrl_state = 'idle'
             return 'idle'
@@ -683,7 +686,7 @@ def main():
                             f"Vel_M (rad/s): {motorEncoder.angular_vel:6.1f} |"
                             f"Theta_M (deg): {motorEncoder.angular_pos_deg:6.1f} |"
                             f"Distance (m): {cart.pos:5.2f} | "
-                            f"Velocity (m/s): {cart.vel:5.2f}"
+                            f"Velocity (m/s): {cart.vel:5.2f}", end = ' \r', flush = True
                         )
                         
                     listener.stop()
