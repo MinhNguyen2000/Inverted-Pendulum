@@ -26,6 +26,9 @@ import numpy as np
 import control
 import keyboard                             # To obtain user input (key presses)
 from pynput import keyboard                 # To obtain user input without needing root access
+import csv
+from datetime import datetime               # For the result file with the state data
+import os
 
 # Constant definition
 PI = math.pi
@@ -46,7 +49,7 @@ ROLL_VALUE = 80000                   # Determine the timer frequency for motor P
 DT = 0.001                          # Sampling time
 center_position = 1.25/2-0.04       # Center position of the cart
 angle_setup_threshold = 10          # Setup threshold for balancing the pendulum from top position (setup within this range from 180deg)
-angle_balance_threshold = 30        # Threshold for active control
+angle_balance_threshold = 15        # Threshold for active control
 cart_position_threshold = 0.50      # Threshold for active control. If difference between cart position and desired position outside this range, stop control.
 
 # System control state definition
@@ -302,7 +305,7 @@ def get_user_input():
         "2": "centering",
         "3": "zeroing",
         "4": "balance",
-        "5": "swing up",
+        # "5": "swing up",
         "9": "state report"
     }
 
@@ -336,7 +339,7 @@ def on_key_press(key):
         pass  # Handle special keys like Shift, etc.
 
 # =============================================================================
-# SystemHistory Class for Plotting
+# Helper functions/class for storing data
 # =============================================================================
 class SystemHistory:
     def __init__(self):
@@ -368,6 +371,14 @@ class SystemHistory:
         self.history = {key: [] for key in self.history}
 
 system_history = SystemHistory()
+
+def write_to_csv(filename: str, state_history: list):
+    try:
+        with open(filename, 'x', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(state_history)
+    except FileExistsError:
+        print(f"The file {filename} already exists")
 
 # =============================================================================
 # State Functions
@@ -537,11 +548,24 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
             within_range = False
 
         time.sleep(0.1)  # Allow time for user to respond
-    listener.stop()
+    
 
     user_ready = False  # Reset this flag for future balances
     print("Beginning control process.")
     start_time_balance = time.time()
+    # system_history = SystemHistory()
+    # system_history.append_state(pendEncoder, cart, 0, 0)
+
+    # Read and store initial state
+    read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart)
+    state_history = [[0, cart.pos, cart.vel, pendEncoder.angular_pos, pendEncoder.angular_vel, 0]]
+
+    result_filename = datetime.now().strftime("invpen_%Y%m%d_%H%M.csv")
+    base_path = "/home/minhnguyen20/Inverted-Pendulum/"
+    result_filepath = os.path.join(base_path,"result",result_filename)
+
+    listener.stop()
+
     while current_ctrl_state == 'balance':
         read_and_process_sensors(labjack_handle, pendEncoder, motorEncoder, cart, dt=DT)
         
@@ -568,23 +592,30 @@ def balance_process(labjack_handle, pendEncoder: Encoder, motorEncoder: Encoder,
               f"Vel_p (rad/s): {pendEncoder.angular_vel:6.2f} | "
               f"Theta_P (deg): {pendEncoder.angular_pos_deg:6.2f} |", end = ' \r'
               )
+        state_history.append([current_time_balance, cart.pos, cart.vel, pendEncoder.angular_pos, pendEncoder.angular_vel, u_V])
+    
+    
 
         # Emergency stop cases
         if abs(pendEncoder.angular_pos_deg - 180) > angle_balance_threshold:
-            print("Control failed - Exceed pendulum angle limit")
+            print(f"\n Control failed - Exceed pendulum angle limit. State data saved to {result_filename}")
             # current_ctrl_state = 'idle'
+            write_to_csv(result_filepath, state_history)
             return 'idle'
 
         if abs(cart.pos) > cart_position_threshold:
-            print("Control failed - Exceed cart position limit")
+            print(f"\n Control failed - Exceed cart position limit. State data saved to {result_filename}")
             # current_ctrl_state = 'idle'
+            write_to_csv(result_filepath, state_history)
             return 'idle'
         
         if current_time_balance >= 60:
-            print("Controlled successfully for 10 seconds. You can plot the system history")
+            print(f"Controlled successfully for 60 seconds. State dataq saved to {result_filename}")
             # current_ctrl_state = 'idle'
+            write_to_csv(result_filepath, state_history)
             return 'idle'
 
+    
     print("Control process done")
     return "idle"
 
@@ -681,12 +712,12 @@ def main():
                     # Display sensor data
                     while current_ctrl_state == 'state report':
                         read_and_process_sensors(handle, pendEncoder, motorEncoder, cart, dt=DT)
-                        print(f"Vel_p (rad/s): {pendEncoder.angular_vel:6.1f} |"
+                        print(f"Distance (m): {cart.pos:6.3f} | "
+                            f"Velocity (m/s): {cart.vel:6.2f} | "
                             f"Theta_P (deg): {pendEncoder.angular_pos_deg:6.1f} |"
-                            f"Vel_M (rad/s): {motorEncoder.angular_vel:6.1f} |"
-                            f"Theta_M (deg): {motorEncoder.angular_pos_deg:6.1f} |"
-                            f"Distance (m): {cart.pos:5.2f} | "
-                            f"Velocity (m/s): {cart.vel:5.2f}", end = ' \r', flush = True
+                            f"Vel_p (rad/s): {pendEncoder.angular_vel:6.1f}", end = ' \r', flush = True
+                            # f"Vel_M (rad/s): {motorEncoder.angular_vel:6.1f} |"
+                            # f"Theta_M (deg): {motorEncoder.angular_pos_deg:6.1f}"
                         )
                         
                     listener.stop()
